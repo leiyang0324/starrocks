@@ -28,6 +28,7 @@
 #include "storage/rowset/rowset_factory.h"
 #include "storage/rowset/rowset_options.h"
 #include "storage/rowset_column_update_state.h"
+#include "storage/schema_change_utils.h"
 #include "storage/snapshot_manager.h"
 #include "storage/storage_engine.h"
 #include "storage/tablet_manager.h"
@@ -643,7 +644,8 @@ TEST_F(RowsetColumnPartialUpdateTest, test_schema_change) {
         // create table with add column, test link_from
         auto new_tablet = create_tablet(6000, 6000, true);
         new_tablet->set_tablet_state(TABLET_NOTREADY);
-        ASSERT_TRUE(new_tablet->updates()->link_from(tablet.get(), version).ok());
+        auto chunk_changer = std::make_unique<ChunkChanger>(new_tablet->tablet_schema());
+        ASSERT_TRUE(new_tablet->updates()->link_from(tablet.get(), version, chunk_changer.get()).ok());
         // check data
         ASSERT_TRUE(check_tablet(new_tablet, version, N, [](int64_t k1, int64_t v1, int32_t v2) {
             return (int16_t)(k1 % 100 + 3) == v1 && (int32_t)(k1 % 1000 + 4) == v2;
@@ -705,6 +707,37 @@ TEST_F(RowsetColumnPartialUpdateTest, test_dcg_gc) {
     ASSERT_TRUE(check_tablet(tablet, version, N, [](int64_t k1, int64_t v1, int32_t v2) {
         return (int16_t)(k1 % 100 + 3) == v1 && (int32_t)(k1 % 1000 + 4) == v2;
     }));
+}
+
+TEST_F(RowsetColumnPartialUpdateTest, test_get_column_values) {
+    const int N = 100;
+    auto tablet = create_tablet(rand(), rand());
+    ASSERT_EQ(1, tablet->updates()->version_history_count());
+    int64_t version = 1;
+    int64_t version_before_partial_update = 1;
+    prepare_tablet(this, tablet, version, version_before_partial_update, N);
+
+    {
+        // get columns by `get_column_values`
+        std::vector<uint32_t> column_ids = {0, 1, 2};
+        std::map<uint32_t, std::vector<uint32_t>> rowids_by_rssid;
+        for (int rowid = 0; rowid < N; rowid++) {
+            rowids_by_rssid[9].push_back(rowid);
+        }
+        auto read_column_schema = ChunkHelper::convert_schema(tablet->tablet_schema(), column_ids);
+        vector<std::unique_ptr<Column>> columns(column_ids.size());
+        for (int colid = 0; colid < column_ids.size(); colid++) {
+            auto column = ChunkHelper::column_from_field(*read_column_schema.field(colid).get());
+            columns[colid] = column->clone_empty();
+        }
+        ASSERT_OK(tablet->updates()->get_column_values(column_ids, version, false, rowids_by_rssid, &columns, nullptr));
+        // check column values
+        for (int i = 0; i < N; i++) {
+            ASSERT_EQ(columns[0]->get(i).get_int64(), i);
+            ASSERT_EQ(columns[1]->get(i).get_int16(), (int16_t)(i % 100 + 3));
+            ASSERT_EQ(columns[2]->get(i).get_int32(), (int32_t)(i % 1000 + 4));
+        }
+    }
 }
 
 } // namespace starrocks

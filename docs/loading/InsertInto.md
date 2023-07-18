@@ -2,7 +2,7 @@
 
 This topic describes how to load data into StarRocks by using a SQL statement - INSERT.
 
-Similar to MySQL and many other database management systems, StarRocks supports loading data to an internal table with INSERT. You can insert one or more rows directly with the VALUES clause to test a function or a DEMO. You can also insert data defined by the results of a query into an internal table from an [external table](../data_source/External_table.md).
+Similar to MySQL and many other database management systems, StarRocks supports loading data to an internal table with INSERT. You can insert one or more rows directly with the VALUES clause to test a function or a DEMO. You can also insert data defined by the results of a query into an internal table from an [external table](../data_source/External_table.md). From StarRocks v3.1 onwards, you can directly load data from files in an external source using the INSERT command and the TABLE keyword.
 
 StarRocks v2.4 further supports overwriting data into a table by using INSERT OVERWRITE. The INSERT OVERWRITE statement integrates the following operations to implement the overwriting function:
 
@@ -19,8 +19,8 @@ StarRocks v2.4 further supports overwriting data into a table by using INSERT OV
 - You can cancel a synchronous INSERT transaction only by pressing the **Ctrl** and **C** keys from your MySQL client.
 - You can submit an asynchronous INSERT task using [SUBMIT TASK](../sql-reference/sql-statements/data-manipulation/SUBMIT%20TASK.md).
 - As for the current version of StarRocks, the INSERT transaction fails by default if the data of any rows does not comply with the schema of the table. For example, the INSERT transaction fails if the length of a field in any row exceeds the length limit for the mapping field in the table. You can set the session variable `enable_insert_strict` to `false` to allow the transaction to continue by filtering out the rows that mismatch the table.
-- If you execute the INSERT statement frequently to load small batches of data into StarRocks, excessive data versions are generated. It severely affects query performance. We recommend that, in production, you should not load data with the INSERT command too often or use it as a routine for data loading on a daily basis. Should your application or analytic scenario demand solutions to loading streaming data or small data batches separately, we recommend you use Apache Kafka® as your data source and load the data via [Routine Load](../loading/RoutineLoad.md).
-- If you execute the INSERT OVERWRITE statement, StarRocks creates temporary partitions for the partitions which store the original data, inserts new data into the temporary partitions, and swaps the original partitions with the temporary partitions. All these operations are executed in the FE Leader node. Hence, if the FE Leader node crashes while executing INSERT OVERWRITE command, the whole load transaction will fail, and the temporary partitions will be truncated.
+- If you execute the INSERT statement frequently to load small batches of data into StarRocks, excessive data versions are generated. It severely affects query performance. We recommend that, in production, you should not load data with the INSERT command too often or use it as a routine for data loading on a daily basis. If your application or analytic scenario demand solutions to loading streaming data or small data batches separately, we recommend you use Apache Kafka® as your data source and load the data via [Routine Load](../loading/RoutineLoad.md).
+- If you execute the INSERT OVERWRITE statement, StarRocks creates temporary partitions for the partitions which store the original data, inserts new data into the temporary partitions, and [swaps the original partitions with the temporary partitions](../sql-statements/data-definition/ALTER%20TABLE.md#use-a-temporary-partition-to-replace-current-partition). All these operations are executed in the FE Leader node. Hence, if the FE Leader node crashes while executing INSERT OVERWRITE command, the whole load transaction will fail, and the temporary partitions will be truncated.
 
 ## Preparation
 
@@ -28,7 +28,7 @@ Create a database named `load_test`, and create a table `insert_wiki_edit` as th
 
 > **NOTE**
 >
-> Examples demonstrated in this topic are based on the table `insert_wiki_edit` and the table `source_wiki_edit`. Should you prefer working with your own tables and data, you can skip the preparation and move on to the next step.
+> Examples demonstrated in this topic are based on the table `insert_wiki_edit` and the table `source_wiki_edit`. If you prefer working with your own tables and data, you can skip the preparation and move on to the next step.
 
 ```SQL
 CREATE DATABASE IF NOT EXISTS load_test;
@@ -65,7 +65,7 @@ PARTITION BY RANGE(event_time)
     PARTITION p18 VALUES LESS THAN ('2015-09-12 18:00:00'),
     PARTITION p24 VALUES LESS THAN ('2015-09-13 00:00:00')
 )
-DISTRIBUTED BY HASH(user) BUCKETS 3;
+DISTRIBUTED BY HASH(user);
 
 CREATE TABLE source_wiki_edit
 (
@@ -99,8 +99,12 @@ PARTITION BY RANGE(event_time)
     PARTITION p18 VALUES LESS THAN ('2015-09-12 18:00:00'),
     PARTITION p24 VALUES LESS THAN ('2015-09-13 00:00:00')
 )
-DISTRIBUTED BY HASH(user) BUCKETS 3;
+DISTRIBUTED BY HASH(user);
 ```
+
+> **NOTICE**
+>
+> Since v2.5.7, StarRocks can automatically set the number of buckets (BUCKETS) when you create a table or add a partition. You no longer need to manually set the number of buckets. For detailed information, see [determine the number of buckets](../table_design/Data_distribution.md#determine-the-number-of-buckets).
 
 ## Insert data via INSERT INTO VALUES
 
@@ -110,7 +114,7 @@ You can append one or more rows to a specific table by using INSERT INTO VALUES 
 >
 > Inserting data via INSERT INTO VALUES merely applies to the situation when you need to verify a DEMO with a small dataset. It is not recommended for a massive testing or production environment. To load mass data into StarRocks, see [Ingestion Overview](../loading/Loading_intro.md) for other options that suit your scenarios.
 
-The following example insert two rows into the data source table `source_wiki_edit` with the label `insert_load_wikipedia`. Label is the unique identification label for each data load transaction within the database.
+The following example inserts two rows into the data source table `source_wiki_edit` with the label `insert_load_wikipedia`. Label is the unique identification label for each data load transaction within the database.
 
 ```SQL
 INSERT INTO source_wiki_edit
@@ -157,7 +161,7 @@ MySQL > select * from insert_wiki_edit;
 2 rows in set (0.00 sec)
 ```
 
-If you [truncate](../sql-reference/sql-functions/math-functions/truncate.md) the `p06` and `p12` partitions, the data will not be returned in a query.
+If you truncate the `p06` and `p12` partitions, the data will not be returned in a query.
 
 ```Plain
 MySQL > TRUNCATE TABLE insert_wiki_edit PARTITION(p06, p12);
@@ -278,7 +282,7 @@ MySQL > select * from insert_wiki_edit;
 2 rows in set (0.01 sec)
 ```
 
-If you [truncate](../sql-reference/sql-functions/math-functions/truncate.md) the `p06` and `p12` partitions, the data will not be returned in a query.
+If you truncate the `p06` and `p12` partitions, the data will not be returned in a query.
 
 ```Plain
 MySQL > TRUNCATE TABLE insert_wiki_edit PARTITION(p06, p12);
@@ -300,9 +304,77 @@ WITH LABEL insert_load_wikipedia_ow_3
 SELECT event_time, channel FROM source_wiki_edit;
 ```
 
+## Insert data directly from files in an external source using TABLE keyword
+
+From v3.1 onwards, StarRocks supports directly loading data from files in an external source using the INSERT command and the TABLE keyword, saving you from the trouble of creating an external table first.
+
+Currently, StarRocks supports the following data sources and file formats:
+
+- **Data sources**:
+  - AWS S3
+- **File formats**:
+  - Parquet
+  - ORC
+
+The following example inserts data rows from the Parquet file **parquet_file/insert_wiki_edit_append.parquet** within the AWS S3 bucket `inserttest` into the table `insert_wiki_edit`:
+
+```Plain
+mysql> INSERT INTO insert_wiki_edit
+    ->     SELECT * FROM TABLE(
+    ->         "path" = "s3://inserttest/parquet/insert_wiki_edit_append.parquet",
+    ->         "format" = "parquet",
+    ->         "aws.s3.access_key" = "xxxxxxxxxx",
+    ->         "aws.s3.secret_key" = "yyyyyyyyyy",
+    ->         "aws.s3.region" = "aa-bbbb-c"
+    -> );
+Query OK, 2 rows affected (0.03 sec)
+{'label':'insert_d8d4b2ee-ac5c-11ed-a2cf-4e1110a8f63b', 'status':'VISIBLE', 'txnId':'2440'}
+```
+
+## Insert data into a table with generated columns
+
+A generated column is a special column whose data is derived from a pre-defined expression or evaluation based on other columns. Generated columns are especially useful when your query requests involve evaluations of expensive expressions, for example, querying a certain field from a JSON value, or querying the aggregation results of the ARRAY type. StarRocks evaluates the expression and stores the results in the generated columns while data is being loaded into the table, thereby avoiding the expression evaluation during queries and improving the query performance.
+
+You can load data into a table with generated columns using INSERT.
+
+The following example creates a table `insert_generated_columns` and inserts a row into it. The table contains two generated columns: `avg_array` and `get_string`. `avg_array` calculates the average value of ARRAY data in `data_array`, and `get_string` extracts the strings from the JSON path `a` in `data_json`.
+
+```SQL
+CREATE TABLE insert_generated_columns (
+  id           INT(11)           NOT NULL    COMMENT "ID",
+  data_array   ARRAY<INT(11)>    NOT NULL    COMMENT "ARRAY",
+  data_json    JSON              NOT NULL    COMMENT "JSON",
+  avg_array    DOUBLE            NULL 
+      AS array_avg(data_array)               COMMENT "Get the average of ARRAY",
+  get_string   VARCHAR(65533)    NULL 
+      AS get_json_string(json_string(data_json), '$.a') COMMENT "Extract JSON string"
+) ENGINE=OLAP 
+PRIMARY KEY(id)
+DISTRIBUTED BY HASH(id);
+
+INSERT INTO insert_generated_columns 
+VALUES (1, [1,2], parse_json('{"a" : 1, "b" : 2}'));
+```
+
+> **NOTE**
+>
+> Directly loading data into generated columns is not supported.
+
+You can query the table to check the data within it.
+
+```Plain
+mysql> SELECT * FROM insert_generated_columns;
++------+------------+------------------+-----------+------------+
+| id   | data_array | data_json        | avg_array | get_string |
++------+------------+------------------+-----------+------------+
+|    1 | [1,2]      | {"a": 1, "b": 2} |       1.5 | 1          |
++------+------------+------------------+-----------+------------+
+1 row in set (0.02 sec)
+```
+
 ## Load data asynchronously using INSERT
 
-Loading data with INSERT submits a synchronous transaction, which may fail because of session interruption or timeout. You can submit an asynchronous INSERT transaction using [SUBMIT TASK](../sql-reference/sql-statements/data-manipulation/SUBMIT%20TASK.md). This feature is supported since StarRocks v3.0.
+Loading data with INSERT submits a synchronous transaction, which may fail because of session interruption or timeout. You can submit an asynchronous INSERT transaction using [SUBMIT TASK](../sql-reference/sql-statements/data-manipulation/SUBMIT%20TASK.md). This feature is supported since StarRocks v2.5.
 
 - The following example asynchronously inserts the data from the source table to the target table `insert_wiki_edit`.
 
@@ -369,7 +441,7 @@ You can locate the problem by checking the log with `tracking_url`.
 
 ### Check via SHOW LOAD
 
-You can check the INSERT transaction status by using SHOW LOAD command.
+You can check the INSERT transaction status by using [SHOW LOAD](../sql-reference/sql-statements/data-manipulation/SHOW%20LOAD.md) command.
 
 The following example checks the status of the transaction with label `insert_load_wikipedia`.
 
@@ -381,26 +453,39 @@ The return is as follows:
 
 ```Plain
 *************************** 1. row ***************************
-         JobId: 13525
+         JobId: 10278
          Label: insert_load_wikipedia
          State: FINISHED
       Progress: ETL:100%; LOAD:100%
           Type: INSERT
+      Priority: NORMAL
+      ScanRows: 0
+  FilteredRows: 0
+UnselectedRows: 0
+      SinkRows: 2
        EtlInfo: NULL
-      TaskInfo: cluster:N/A; timeout(s):3600; max_filter_ratio:0.0
+      TaskInfo: resource:N/A; timeout(s):300; max_filter_ratio:0.0
       ErrorMsg: NULL
-    CreateTime: 2022-08-02 11:41:26
-  EtlStartTime: 2022-08-02 11:41:26
- EtlFinishTime: 2022-08-02 11:41:26
- LoadStartTime: 2022-08-02 11:41:26
-LoadFinishTime: 2022-08-02 11:41:26
-           URL: 
-    JobDetails: {"Unfinished backends":{},"ScannedRows":0,"TaskNumber":0,"All backends":{},"FileNumber":0,"FileSize":0}
+    CreateTime: 2023-06-12 18:31:07
+  EtlStartTime: 2023-06-12 18:31:07
+ EtlFinishTime: 2023-06-12 18:31:07
+ LoadStartTime: 2023-06-12 18:31:07
+LoadFinishTime: 2023-06-12 18:31:08
+   TrackingSQL: 
+    JobDetails: {"All backends":{"3d96e21a-090c-11ee-9083-00163e0e2cf9":[10142]},"FileNumber":0,"FileSize":0,"InternalTableLoadBytes":175,"InternalTableLoadRows":2,"ScanBytes":0,"ScanRows":0,"TaskNumber":1,"Unfinished backends":{"3d96e21a-090c-11ee-9083-00163e0e2cf9":[]}}
+1 row in set (0.00 sec)
 ```
 
 ### Check via curl command
 
 You can check the INSERT transaction status by using curl command.
+
+Launch a terminal, and execute the following command:
+
+```Bash
+curl --location-trusted -u <username>:<password> \
+  http://<fe_address>:<fe_http_port>/api/<db_name>/_load_info?label=<label_name>
+```
 
 The following example checks the status of the transaction with label `insert_load_wikipedia`.
 
@@ -417,19 +502,18 @@ The return is as follows:
 
 ```Plain
 {
-  "jobInfo": {
-    "dbName": "default_cluster:load_test",
-    "tblNames": [
-      "source_wiki_edit"
-    ],
-    "label": "insert_load_wikipedia",
-    "clusterName": "default_cluster",
-    "state": "FINISHED",
-    "failMsg": "",
-    "trackingUrl": ""
-  },
-  "status": "OK",
-  "msg": "Success"
+   "jobInfo":{
+      "dbName":"load_test",
+      "tblNames":[
+         "source_wiki_edit"
+      ],
+      "label":"insert_load_wikipedia",
+      "state":"FINISHED",
+      "failMsg":"",
+      "trackingUrl":""
+   },
+   "status":"OK",
+   "msg":"Success"
 }
 ```
 
@@ -447,5 +531,5 @@ You can set the following configuration items for INSERT transaction:
 
 | Session variable     | Description                                                  |
 | -------------------- | ------------------------------------------------------------ |
-| enable_insert_strict | Switch value to control if the INSERT transaction is tolerant of invalid data rows. When it is set to `true`, the transaction fails if any of the data rows is invalid. When it is set to `false`, the transaction succeeds when at least one row of data has been loaded correctly, and the label will be returned. The default is `true`. You can set this variable with `SET enable_insert_strict = {true | false};` command. |
+| enable_insert_strict | Switch value to control if the INSERT transaction is tolerant of invalid data rows. When it is set to `true`, the transaction fails if any of the data rows is invalid. When it is set to `false`, the transaction succeeds when at least one row of data has been loaded correctly, and the label will be returned. The default is `true`. You can set this variable with `SET enable_insert_strict = {true or false};` command. |
 | query_timeout        | Timeout for SQL commands. Unit: second. INSERT, as a SQL command, is also restricted by this session variable. You can set this variable with the `SET query_timeout = xxx;` command. |

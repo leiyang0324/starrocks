@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.starrocks.analysis.BinaryPredicate;
+import com.starrocks.analysis.BinaryType;
 import com.starrocks.analysis.CompoundPredicate;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.IntLiteral;
@@ -32,7 +33,8 @@ import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Database;
 import com.starrocks.catalog.Function;
 import com.starrocks.catalog.HiveTable;
-import com.starrocks.catalog.MaterializedIndex;
+import com.starrocks.catalog.HiveView;
+import com.starrocks.catalog.MaterializedIndexMeta;
 import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Resource;
 import com.starrocks.catalog.Table;
@@ -288,11 +290,19 @@ public class QueryAnalyzer {
                     ViewRelation viewRelation = new ViewRelation(tableName, view, queryStatement);
                     viewRelation.setAlias(tableRelation.getAlias());
                     return viewRelation;
+                } else if (table instanceof HiveView) {
+                    HiveView hiveView = (HiveView) table;
+                    QueryStatement queryStatement = hiveView.getQueryStatement();
+                    View view = new View(hiveView.getId(), hiveView.getName(), hiveView.getFullSchema());
+                    view.setInlineViewDefWithSqlMode(hiveView.getInlineViewDef(), 0);
+                    ViewRelation viewRelation = new ViewRelation(tableName, view, queryStatement);
+                    viewRelation.setAlias(tableRelation.getAlias());
+                    return viewRelation;
                 } else {
                     if (tableRelation.getTemporalClause() != null) {
                         if (table.getType() != Table.TableType.MYSQL) {
                             throw unsupportedException(
-                                    "unsupported table type for temporal clauses: " + table.getType() +
+                                    "Unsupported table type for temporal clauses: " + table.getType() +
                                             "; only external MYSQL tables support temporal clauses");
                         }
                     }
@@ -301,7 +311,7 @@ public class QueryAnalyzer {
                         tableRelation.setTable(table);
                         return tableRelation;
                     } else {
-                        throw unsupportedException("unsupported scan table type: " + table.getType());
+                        throw unsupportedException("Unsupported scan table type: " + table.getType());
                     }
                 }
             } else {
@@ -355,21 +365,23 @@ public class QueryAnalyzer {
 
             node.setColumns(columns.build());
             String dbName = node.getName().getDb();
+            if (session.getDumpInfo() != null) {
+                session.getDumpInfo().addTable(dbName, table);
 
-            session.getDumpInfo().addTable(dbName, table);
-            if (table.isHiveTable()) {
-                HiveTable hiveTable = (HiveTable) table;
-                Resource resource = GlobalStateMgr.getCurrentState().getResourceMgr().
-                        getResource(hiveTable.getResourceName());
-                if (resource != null) {
-                    session.getDumpInfo().addResource(resource);
+                if (table.isHiveTable()) {
+                    HiveTable hiveTable = (HiveTable) table;
+                    session.getDumpInfo().addHMSTable(hiveTable.getResourceName(), hiveTable.getDbName(),
+                            hiveTable.getTableName());
+                    HiveMetaStoreTableDumpInfo hiveMetaStoreTableDumpInfo = session.getDumpInfo().getHMSTable(
+                            hiveTable.getResourceName(), hiveTable.getDbName(), hiveTable.getTableName());
+                    hiveMetaStoreTableDumpInfo.setPartColumnNames(hiveTable.getPartitionColumnNames());
+                    hiveMetaStoreTableDumpInfo.setDataColumnNames(hiveTable.getDataColumnNames());
+                    Resource resource = GlobalStateMgr.getCurrentState().getResourceMgr().
+                            getResource(hiveTable.getResourceName());
+                    if (resource != null) {
+                        session.getDumpInfo().addResource(resource);
+                    }
                 }
-                session.getDumpInfo().addHMSTable(hiveTable.getResourceName(), hiveTable.getDbName(),
-                        hiveTable.getTableName());
-                HiveMetaStoreTableDumpInfo hiveMetaStoreTableDumpInfo = session.getDumpInfo().getHMSTable(
-                        hiveTable.getResourceName(), hiveTable.getDbName(), hiveTable.getTableName());
-                hiveMetaStoreTableDumpInfo.setPartColumnNames(hiveTable.getPartitionColumnNames());
-                hiveMetaStoreTableDumpInfo.setDataColumnNames(hiveTable.getDataColumnNames());
             }
 
             Scope scope = new Scope(RelationId.of(node), new RelationFields(fields.build()));
@@ -548,7 +560,7 @@ public class QueryAnalyzer {
                         right.resolveField(new SlotRef(null, colName)).getField().getRelationAlias();
 
                 // create predicate "<left>.colName = <right>.colName"
-                BinaryPredicate resolvedUsing = new BinaryPredicate(BinaryPredicate.Operator.EQ,
+                BinaryPredicate resolvedUsing = new BinaryPredicate(BinaryType.EQ,
                         new SlotRef(leftTableName, colName), new SlotRef(rightTableName, colName));
 
                 if (joinEqual == null) {
@@ -617,32 +629,36 @@ public class QueryAnalyzer {
             }
             Scope scope = new Scope(RelationId.of(subquery), new RelationFields(outputFields.build()));
 
-            if (subquery.hasOrderByClause()) {
-                List<Expr> outputExpressions = subquery.getOutputExpression();
-                for (OrderByElement orderByElement : subquery.getOrderBy()) {
-                    Expr expression = orderByElement.getExpr();
-                    AnalyzerUtils.verifyNoGroupingFunctions(expression, "ORDER BY");
-
-                    if (expression instanceof IntLiteral) {
-                        long ordinal = ((IntLiteral) expression).getLongValue();
-                        if (ordinal < 1 || ordinal > outputExpressions.size()) {
-                            throw new SemanticException("ORDER BY position %s is not in select list", ordinal);
-                        }
-                        expression = new FieldReference((int) ordinal - 1, null);
-                    }
-
-                    analyzeExpression(expression, new AnalyzeState(), scope);
-
-                    if (!expression.getType().canOrderBy()) {
-                        throw new SemanticException(Type.ONLY_METRIC_TYPE_ERROR_MSG);
-                    }
-
-                    orderByElement.setExpr(expression);
-                }
-            }
-
+            analyzeOrderByClause(subquery, scope);
             subquery.setScope(scope);
             return scope;
+        }
+
+        private void analyzeOrderByClause(QueryRelation query, Scope scope) {
+            if (!query.hasOrderByClause()) {
+                return;
+            }
+            List<Expr> outputExpressions = query.getOutputExpression();
+            for (OrderByElement orderByElement : query.getOrderBy()) {
+                Expr expression = orderByElement.getExpr();
+                AnalyzerUtils.verifyNoGroupingFunctions(expression, "ORDER BY");
+
+                if (expression instanceof IntLiteral) {
+                    long ordinal = ((IntLiteral) expression).getLongValue();
+                    if (ordinal < 1 || ordinal > outputExpressions.size()) {
+                        throw new SemanticException("ORDER BY position %s is not in select list", ordinal);
+                    }
+                    expression = new FieldReference((int) ordinal - 1, null);
+                }
+
+                analyzeExpression(expression, new AnalyzeState(), scope);
+
+                if (!expression.getType().canOrderBy()) {
+                    throw new SemanticException(Type.NOT_SUPPORT_ORDER_ERROR_MSG);
+                }
+
+                orderByElement.setExpr(expression);
+            }
         }
 
         @Override
@@ -672,8 +688,11 @@ public class QueryAnalyzer {
                 fields.add(field);
             }
 
-            String dbName = node.getName().getDb();
-            session.getDumpInfo().addView(dbName, view);
+            if (session.getDumpInfo() != null) {
+                String dbName = node.getName().getDb();
+                session.getDumpInfo().addView(dbName, view);
+            }
+
             Scope viewScope = new Scope(RelationId.of(node), new RelationFields(fields));
             node.setScope(viewScope);
             return viewScope;
@@ -726,8 +745,7 @@ public class QueryAnalyzer {
 
                     Type commonType = TypeManager.getCommonSuperType(outputTypes[fieldIdx],
                             relation.getRelationFields().getFieldByIndex(fieldIdx).getType());
-                    // @todo: support struct type
-                    if (!commonType.isValid() || commonType.isStructType()) {
+                    if (!commonType.isValid()) {
                         throw new SemanticException(String.format("Incompatible return types '%s' and '%s'",
                                 outputTypes[fieldIdx],
                                 relation.getRelationFields().getFieldByIndex(fieldIdx).getType()));
@@ -746,30 +764,7 @@ public class QueryAnalyzer {
 
             Scope setOpOutputScope = new Scope(RelationId.of(node), new RelationFields(fields));
 
-            if (node.hasOrderByClause()) {
-                List<Expr> outputExpressions = node.getOutputExpression();
-                for (OrderByElement orderByElement : node.getOrderBy()) {
-                    Expr expression = orderByElement.getExpr();
-                    AnalyzerUtils.verifyNoGroupingFunctions(expression, "ORDER BY");
-
-                    if (expression instanceof IntLiteral) {
-                        long ordinal = ((IntLiteral) expression).getLongValue();
-                        if (ordinal < 1 || ordinal > outputExpressions.size()) {
-                            throw new SemanticException("ORDER BY position %s is not in select list", ordinal);
-                        }
-                        expression = new FieldReference((int) ordinal - 1, null);
-                    }
-
-                    analyzeExpression(expression, new AnalyzeState(), setOpOutputScope);
-
-                    if (!expression.getType().canOrderBy()) {
-                        throw new SemanticException(Type.ONLY_METRIC_TYPE_ERROR_MSG);
-                    }
-
-                    orderByElement.setExpr(expression);
-                }
-            }
-
+            analyzeOrderByClause(node, setOpOutputScope);
             node.setScope(setOpOutputScope);
             return setOpOutputScope;
         }
@@ -790,8 +785,7 @@ public class QueryAnalyzer {
                     analyzeExpression(row.get(fieldIdx), analyzeState, scope);
                     Type commonType =
                             TypeManager.getCommonSuperType(outputTypes[fieldIdx], row.get(fieldIdx).getType());
-                    // @todo: support struct type
-                    if (!commonType.isValid() || commonType.isStructType()) {
+                    if (!commonType.isValid()) {
                         throw new SemanticException(String.format("Incompatible return types '%s' and '%s'",
                                 outputTypes[fieldIdx], row.get(fieldIdx).getType()));
                     }
@@ -889,6 +883,7 @@ public class QueryAnalyzer {
             node.setScope(node.getRight().getScope());
             return node.getScope();
         }
+
     }
 
     private Table resolveTable(TableRelation tableRelation) {
@@ -911,7 +906,7 @@ public class QueryAnalyzer {
 
             Table table = null;
             if (tableRelation.isSyncMVQuery()) {
-                Pair<Table, MaterializedIndex> materializedIndex =
+                Pair<Table, MaterializedIndexMeta> materializedIndex =
                         metadataMgr.getMaterializedViewIndex(catalogName, dbName, tbName);
                 if (materializedIndex != null) {
                     Table mvTable = materializedIndex.first;
@@ -920,9 +915,10 @@ public class QueryAnalyzer {
                     try {
                         // Add read lock to avoid concurrent problems.
                         database.readLock();
-                        OlapTable mvOlapTable = ((OlapTable) mvTable).copyOnlyForQuery();
+                        OlapTable mvOlapTable = new OlapTable();
+                        ((OlapTable) mvTable).copyOnlyForQuery(mvOlapTable);
                         // Copy the necessary olap table meta to avoid changing original meta;
-                        mvOlapTable.setBaseIndexId(materializedIndex.second.getId());
+                        mvOlapTable.setBaseIndexId(materializedIndex.second.getIndexId());
                         table = mvOlapTable;
                     } finally {
                         database.readUnlock();
@@ -951,7 +947,7 @@ public class QueryAnalyzer {
         try {
             return new TableFunctionTable(properties);
         } catch (DdlException e) {
-            throw new SemanticException(e.getMessage());
+            throw new StorageAccessException(e);
         }
     }
 
@@ -963,7 +959,7 @@ public class QueryAnalyzer {
         if (expr instanceof BinaryPredicate) {
             for (Expr child : expr.getChildren()) {
                 if (!child.getType().canJoinOn()) {
-                    throw new SemanticException(Type.ONLY_METRIC_TYPE_ERROR_MSG);
+                    throw new SemanticException(Type.NOT_SUPPORT_JOIN_ERROR_MSG);
                 }
             }
         } else {

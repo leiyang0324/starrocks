@@ -56,10 +56,12 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class CreateTableTest {
     private static ConnectContext connectContext;
+    private static StarRocksAssert starRocksAssert;
 
     @BeforeClass
     public static void beforeClass() throws Exception {
@@ -72,6 +74,7 @@ public class CreateTableTest {
         Config.enable_auto_tablet_distribution = true;
         // create connect context
         connectContext = UtFrameUtils.createDefaultCtx();
+        starRocksAssert = new StarRocksAssert(connectContext);
         // create database
         String createDbStmtStr = "create database test;";
         CreateDbStmt createDbStmt = (CreateDbStmt) UtFrameUtils.parseStmtWithNewParser(createDbStmtStr, connectContext);
@@ -245,6 +248,35 @@ public class CreateTableTest {
                         "    \"replication_num\" = \"1\"\n" +
                         ");"));
 
+        ExceptionChecker
+                .expectThrowsNoException(() -> createTable("CREATE TABLE test.dynamic_partition_without_prefix (\n" +
+                        "event_day DATE,\n" +
+                        "site_id INT DEFAULT '10',\n" +
+                        "city_code VARCHAR(\n" +
+                        "100\n" +
+                        "),\n" +
+                        "user_name VARCHAR(\n" +
+                        "32\n" +
+                        ") DEFAULT '',\n" +
+                        "pv BIGINT DEFAULT '0'\n" +
+                        ")\n" +
+                        "DUPLICATE KEY(event_day, site_id, city_code, user_name)\n" +
+                        "PARTITION BY RANGE(event_day)(\n" +
+                        "PARTITION p20200321 VALUES LESS THAN (\"2020-03-22\"),\n" +
+                        "PARTITION p20200322 VALUES LESS THAN (\"2020-03-23\"),\n" +
+                        "PARTITION p20200323 VALUES LESS THAN (\"2020-03-24\"),\n" +
+                        "PARTITION p20200324 VALUES LESS THAN (\"2020-03-25\")\n" +
+                        ")\n" +
+                        "DISTRIBUTED BY HASH(event_day, site_id)\n" +
+                        "PROPERTIES(\n" +
+                        "\t\"replication_num\" = \"1\",\n" +
+                        "    \"dynamic_partition.enable\" = \"true\",\n" +
+                        "    \"dynamic_partition.time_unit\" = \"DAY\",\n" +
+                        "    \"dynamic_partition.start\" = \"-3\",\n" +
+                        "    \"dynamic_partition.end\" = \"3\",\n" +
+                        "    \"dynamic_partition.history_partition_num\" = \"0\"\n" +
+                        ");"));
+
         Database db = GlobalStateMgr.getCurrentState().getDb("test");
         OlapTable tbl6 = (OlapTable) db.getTable("tbl6");
         Assert.assertTrue(tbl6.getColumn("k1").isKey());
@@ -293,7 +325,7 @@ public class CreateTableTest {
                         + "distributed by hash(k2) buckets 1\n" + "properties('replication_num' = '1'); "));
 
         ExceptionChecker
-                .expectThrowsWithMsg(DdlException.class, "Table 'atbl6' already exists",
+                .expectThrowsWithMsg(AnalysisException.class, "Table 'atbl6' already exists",
                         () -> createTable("create table test.atbl6\n" + "(k1 int, k2 int, k3 int)\n"
                                 + "duplicate key(k1, k2, k3)\n" + "distributed by hash(k1) buckets 1\n"
                                 + "properties('replication_num' = '1');"));
@@ -363,15 +395,15 @@ public class CreateTableTest {
                         + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES"
                         + " ('replication_num' = '1');\n"));
 
-        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Input 'AS' is not "
-                        + "valid at this position.",
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Unexpected input 'AS', " +
+                        "the most similar input is {',', ')'}.",
                 () -> createTable("CREATE TABLE test.atbl17 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
                         + "mc DOUBLE AUTO_INCREMENT AS (array_avg(array_data)) ) \n"
                         + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES"
                         + "('replication_num' = '1');\n"));
 
-        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Input 'AS' is not "
-                        + "valid at this position.",
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Unexpected input 'AS', " +
+                        "the most similar input is {',', ')'}.",
                 () -> createTable("CREATE TABLE test.atbl18 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
                         + "mc DOUBLE DEFAULT '1.0' AS (array_avg(array_data)) ) \n"
                         + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES"
@@ -396,7 +428,7 @@ public class CreateTableTest {
                         + "('replication_num' = '1');\n"));
 
         ExceptionChecker.expectThrowsWithMsg(DdlException.class,
-                "Unknown properties: {asd=true, enable_storage_cache=true, storage_cache_ttl=86400}",
+                "Unknown properties: {datacache.enable=true, asd=true}",
                 () -> createTable("CREATE TABLE test.demo (k0 tinyint NOT NULL, k1 date NOT NULL, k2 int NOT NULL," +
                         " k3 datetime not NULL, k4 bigint not NULL, k5 largeint not NULL) \n" +
                         "ENGINE = OLAP \n" +
@@ -404,7 +436,26 @@ public class CreateTableTest {
                         "PARTITION BY RANGE (k1) (START (\"1970-01-01\") END (\"2022-09-30\") " +
                         "EVERY (INTERVAL 60 day)) DISTRIBUTED BY HASH(k0) BUCKETS 1 " +
                         "PROPERTIES (\"replication_num\"=\"1\",\"enable_persistent_index\" = \"false\"," +
-                        "\"enable_storage_cache\" = \"true\",\"storage_cache_ttl\" = \"86400\",\"asd\" = \"true\");"));
+                        "\"datacache.enable\" = \"true\",\"asd\" = \"true\");"));
+
+        ExceptionChecker.expectThrowsWithMsg(DdlException.class,
+                "Unknown properties: {abc=def}",
+                () -> createTable("CREATE TABLE test.lake_table\n" +
+                        "(\n" +
+                        "    k1 DATE,\n" +
+                        "    k2 INT,\n" +
+                        "    k3 SMALLINT,\n" +
+                        "    v1 VARCHAR(2048),\n" +
+                        "    v2 DATETIME DEFAULT \"2014-02-04 15:36:00\"\n" +
+                        ")\n" +
+                        "DUPLICATE KEY(k1, k2, k3)\n" +
+                        "PARTITION BY RANGE (k1, k2, k3)\n" +
+                        "(\n" +
+                        "    PARTITION p1 VALUES [(\"2014-01-01\", \"10\", \"200\"), (\"2014-01-01\", \"20\", \"300\")),\n" +
+                        "    PARTITION p2 VALUES [(\"2014-06-01\", \"100\", \"200\"), (\"2014-07-01\", \"100\", \"300\"))\n" +
+                        ")\n" +
+                        "DISTRIBUTED BY HASH(k2) BUCKETS 32\n" +
+                        "PROPERTIES ( \"replication_num\" = \"1\", \"abc\" = \"def\");"));
     }
 
     @Test
@@ -1364,7 +1415,7 @@ public class CreateTableTest {
     @Test
     public void testCreateTableInSystemDb() {
         ExceptionChecker.expectThrowsWithMsg(DdlException.class,
-                "Can't create table 'goods' (errno: create denied)",
+                "Can't create table 'goods' (errno: cannot create table in system database)",
                 () -> createTable(
                         "CREATE TABLE information_schema.goods(\n" +
                                 "    item_id1          INT,\n" +
@@ -1409,5 +1460,72 @@ public class CreateTableTest {
                         "partition by range(k1)\n" +
                         "(partition p1 values less than(\"10\"))\n" +
                         "distributed by hash(k1) buckets 1\n" + "properties('replication_num' = '1');"));
+    }
+
+    @Test
+    public void testCreateCrossDatabaseColocateTable() throws Exception {
+        starRocksAssert.withDatabase("dwd");
+        String sql1 = "CREATE TABLE dwd.dwd_site_scan_dtl_test (\n" +
+                "ship_id int(11) NOT NULL COMMENT \" \",\n" +
+                "sub_ship_id bigint(20) NOT NULL COMMENT \" \"\n" +
+                ") ENGINE=OLAP\n" +
+                "DUPLICATE KEY(ship_id, sub_ship_id) COMMENT \"OLAP\"\n" +
+                "DISTRIBUTED BY HASH(ship_id) BUCKETS 48\n" +
+                "PROPERTIES (\n" +
+                "\"replication_num\" = \"1\",\n" +
+                "\"colocate_with\" = \"ship_id_public\",\n" +
+                "\"in_memory\" = \"false\",\n" +
+                "\"storage_format\" = \"DEFAULT\",\n" +
+                "\"enable_persistent_index\" = \"true\",\n" +
+                "\"replicated_storage\" = \"true\",\n" +
+                "\"compression\" = \"LZ4\"\n" +
+                ");";
+        starRocksAssert.withTable(sql1);
+
+        starRocksAssert.withDatabase("ods");
+        String sql2 = "CREATE TABLE ods.reg_bill_info_test (\n" +
+                "unit_tm datetime NOT NULL COMMENT \" \",\n" +
+                "ship_id int(11) NOT NULL COMMENT \" \",\n" +
+                "ins_db_tm datetime NULL COMMENT \" \"\n" +
+                ") ENGINE=OLAP\n" +
+                "DUPLICATE KEY(unit_tm, ship_id)\n" +
+                "DISTRIBUTED BY HASH(ship_id) BUCKETS 48\n" +
+                "PROPERTIES (\n" +
+                "\"replication_num\" = \"1\",\n" +
+                "\"colocate_with\" = \"ship_id_public\",\n" +
+                "\"in_memory\" = \"false\",\n" +
+                "\"storage_format\" = \"DEFAULT\",\n" +
+                "\"enable_persistent_index\" = \"true\",\n" +
+                "\"compression\" = \"LZ4\"\n" +
+                ");";
+        starRocksAssert.withTable(sql2);
+
+        List<List<String>> result = GlobalStateMgr.getCurrentState().getColocateTableIndex().getInfos();
+        System.out.println(result);
+        List<String> groupIds = new ArrayList<>();
+        for (List<String> e : result) {
+            if (e.get(1).contains("ship_id_public")) {
+                groupIds.add(e.get(0));
+            }
+        }
+        Assert.assertEquals(2, groupIds.size());
+        System.out.println(groupIds);
+        // colocate groups in different db should have same `GroupId.grpId`
+        Assert.assertEquals(groupIds.get(0).split("\\.")[1], groupIds.get(1).split("\\.")[1]);
+    }
+
+    @Test
+    public void testRandomColocateTable() {
+        String sql1 = "CREATE TABLE dwd.dwd_site_scan_dtl_test (\n" +
+                "ship_id int(11) NOT NULL COMMENT \" \",\n" +
+                "sub_ship_id bigint(20) NOT NULL COMMENT \" \"\n" +
+                ") ENGINE=OLAP\n" +
+                "DUPLICATE KEY(ship_id, sub_ship_id) COMMENT \"OLAP\"\n" +
+                "DISTRIBUTED BY RANDOM " +
+                "PROPERTIES (\n" +
+                "\"replication_num\" = \"1\",\n" +
+                "\"colocate_with\" = \"ship_id_public\"" +
+                ");";
+        Assert.assertThrows(AnalysisException.class, () -> starRocksAssert.withTable(sql1));
     }
 }

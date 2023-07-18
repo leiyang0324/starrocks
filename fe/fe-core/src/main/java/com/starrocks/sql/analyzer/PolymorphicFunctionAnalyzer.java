@@ -92,12 +92,14 @@ public class PolymorphicFunctionAnalyzer {
         return newFn;
     }
 
-    private static Type[] resolveArgTypes(Type[] declTypes, Type[] inputArgTypes) {
+    private static Type[] resolveArgTypes(Function fn, Type[] inputArgTypes) {
         // Use inputArgTypes length, because function may be a variable arguments
         Type[] resolvedTypes = Arrays.copyOf(inputArgTypes, inputArgTypes.length);
+        Type[] argsTypes = fn.getArgs();
 
-        for (int i = 0; i < declTypes.length; ++i) {
-            Type declType = declTypes[i];
+        int size = Math.max(argsTypes.length, inputArgTypes.length);
+        for (int i = 0; i < size; ++i) {
+            Type declType = i >= argsTypes.length ? argsTypes[argsTypes.length - 1] : argsTypes[i];
             Type inputType = inputArgTypes[i];
 
             // If declaration type is not a pseudo type, use it.
@@ -116,12 +118,14 @@ public class PolymorphicFunctionAnalyzer {
             } else {
                 resolvedTypes[i] = inputType;
             }
+
+            resolvedTypes[i] = AnalyzerUtils.replaceNullType2Boolean(resolvedTypes[i]);
         }
         return resolvedTypes;
     }
 
     private static Function resolveByReplacingInputs(Function fn, Type[] inputArgTypes) {
-        Type[] resolvedArgTypes = resolveArgTypes(fn.getArgs(), inputArgTypes);
+        Type[] resolvedArgTypes = resolveArgTypes(fn, inputArgTypes);
         if (fn instanceof ScalarFunction) {
             return newScalarFunction((ScalarFunction) fn, Arrays.asList(resolvedArgTypes), fn.getReturnType());
         }
@@ -229,7 +233,7 @@ public class PolymorphicFunctionAnalyzer {
         if (deduce == null) {
             return null;
         }
-        Type[] resolvedArgTypes = resolveArgTypes(fn.getArgs(), inputArgTypes);
+        Type[] resolvedArgTypes = resolveArgTypes(fn, inputArgTypes);
         Type newRetType = deduce.apply(resolvedArgTypes);
         if (fn instanceof ScalarFunction) {
             return newScalarFunction((ScalarFunction) fn, Arrays.asList(resolvedArgTypes), newRetType);
@@ -288,6 +292,7 @@ public class PolymorphicFunctionAnalyzer {
         Type retType = fn.getReturnType();
         Type[] declTypes = fn.getArgs();
         Function resolvedFunction;
+
         long numPseudoArgs = Arrays.stream(declTypes).filter(Type::isPseudoType).count();
         // resolve single pseudo type parameter, example: int array_length(ANY_ARRAY)
         if (!retType.isPseudoType() && numPseudoArgs == 1) {
@@ -308,9 +313,9 @@ public class PolymorphicFunctionAnalyzer {
         Type typeElement;
 
         List<Type> allRealElementType = Lists.newArrayList();
-
-        for (int i = 0; i < declTypes.length; i++) {
-            Type declType = declTypes[i];
+        int size = fn.hasVarArgs() ? paramTypes.length : declTypes.length;
+        for (int i = 0; i < size; i++) {
+            Type declType = i >= declTypes.length ? fn.getVarArgsType() : declTypes[i];
             Type realType = paramTypes[i];
             if (declType instanceof AnyArrayType) {
                 if (realType.isNull()) {
@@ -329,13 +334,12 @@ public class PolymorphicFunctionAnalyzer {
         if (!allRealElementType.isEmpty()) {
             Type commonType = allRealElementType.get(0);
             for (Type type : allRealElementType) {
-                commonType = getSuperType(commonType, type);
+                commonType = TypeManager.getCommonSuperType(commonType, type);
                 if (commonType == null) {
                     LOGGER.warn("could not determine polymorphic type because input has non-match types");
                     return null;
                 }
             }
-
             commonType = AnalyzerUtils.replaceNullType2Boolean(commonType);
             typeArray = new ArrayType(commonType);
             typeElement = commonType;

@@ -21,7 +21,9 @@
 #ifdef WITH_CACHELIB
 #include "block_cache/cachelib_wrapper.h"
 #endif
+#ifdef WITH_STARCACHE
 #include "block_cache/starcache_wrapper.h"
+#endif
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/statusor.h"
@@ -30,6 +32,12 @@
 namespace starrocks {
 
 namespace fs = std::filesystem;
+
+// The cachelib doesn't support a item (key+valueu+attribute) larger than 4 MB without chain.
+// So, we check and limit the block_size configured by users to avoid unexpected errors.
+// For starcache, in theory we doesn't have a hard limitation for block size, but a very large
+// block_size may cause heavy read amplification. So, we also limit it to 2 MB as an empirical value.
+const size_t BlockCache::MAX_BLOCK_SIZE = 2 * 1024 * 1024;
 
 BlockCache* BlockCache::instance() {
     static BlockCache cache;
@@ -55,16 +63,20 @@ Status BlockCache::init(const CacheOptions& options) {
             }
         }
     }
-    _block_size = options.block_size;
+    _block_size = std::min(options.block_size, MAX_BLOCK_SIZE);
+#ifdef WITH_CACHELIB
+    if (options.engine == "cachelib") {
+        _kv_cache = std::make_unique<CacheLibWrapper>();
+        LOG(INFO) << "init cachelib engine, block_size: " << _block_size;
+    }
+#endif
+#ifdef WITH_STARCACHE
     if (options.engine == "starcache") {
         _kv_cache = std::make_unique<StarCacheWrapper>();
-        LOG(INFO) << "init starcache block engine";
-#ifdef WITH_CACHELIB
-    } else if (options.engine == "cachelib") {
-        _kv_cache = std::make_unique<CacheLibWrapper>();
-        LOG(INFO) << "init cachelib block engine";
+        LOG(INFO) << "init starcache engine, block_size: " << _block_size;
+    }
 #endif
-    } else {
+    if (!_kv_cache) {
         LOG(ERROR) << "unsupported block cache engine: " << options.engine;
         return Status::NotSupported("unsupported block cache engine");
     }

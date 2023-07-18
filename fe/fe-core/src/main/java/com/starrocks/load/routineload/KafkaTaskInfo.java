@@ -72,14 +72,20 @@ public class KafkaTaskInfo extends RoutineLoadTaskInfo {
     private Map<Integer, Long> latestPartOffset;
 
     public KafkaTaskInfo(UUID id, long jobId, long taskScheduleIntervalMs, long timeToExecuteMs,
-                         Map<Integer, Long> partitionIdToOffset) {
-        super(id, jobId, taskScheduleIntervalMs, timeToExecuteMs);
+                         Map<Integer, Long> partitionIdToOffset, long taskTimeoutMs) {
+        super(id, jobId, taskScheduleIntervalMs, timeToExecuteMs, taskTimeoutMs);
         this.partitionIdToOffset = partitionIdToOffset;
     }
 
-    public KafkaTaskInfo(long timeToExecuteMs, KafkaTaskInfo kafkaTaskInfo, Map<Integer, Long> partitionIdToOffset) {
+    public KafkaTaskInfo(long timeToExecuteMs, KafkaTaskInfo kafkaTaskInfo, Map<Integer, Long> partitionIdToOffset,
+                         Map<Integer, Long> latestPartOffset) {
+        this(timeToExecuteMs, kafkaTaskInfo, partitionIdToOffset, kafkaTaskInfo.getTimeoutMs());
+    }
+
+    public KafkaTaskInfo(long timeToExecuteMs, KafkaTaskInfo kafkaTaskInfo, Map<Integer, Long> partitionIdToOffset,
+                         long tastTimeoutMs) {
         super(UUID.randomUUID(), kafkaTaskInfo.getJobId(),
-                kafkaTaskInfo.getTaskScheduleIntervalMs(), timeToExecuteMs, kafkaTaskInfo.getBeId());
+                kafkaTaskInfo.getTaskScheduleIntervalMs(), timeToExecuteMs, kafkaTaskInfo.getBeId(), tastTimeoutMs);
         this.partitionIdToOffset = partitionIdToOffset;
     }
 
@@ -168,7 +174,7 @@ public class KafkaTaskInfo extends RoutineLoadTaskInfo {
         tRoutineLoadTask.setKafka_load_info(tKafkaLoadInfo);
         tRoutineLoadTask.setType(TLoadSourceType.KAFKA);
         tRoutineLoadTask.setParams(plan(routineLoadJob));
-        tRoutineLoadTask.setMax_interval_s(Config.routine_load_task_consume_second);
+        tRoutineLoadTask.setMax_interval_s(routineLoadJob.getTaskConsumeSecond());
         tRoutineLoadTask.setMax_batch_rows(routineLoadJob.getMaxBatchRows());
         tRoutineLoadTask.setMax_batch_size(Config.max_routine_load_batch_size);
         if (!routineLoadJob.getFormat().isEmpty() && routineLoadJob.getFormat().equalsIgnoreCase("json")) {
@@ -187,8 +193,17 @@ public class KafkaTaskInfo extends RoutineLoadTaskInfo {
 
     @Override
     protected String getTaskDataSourceProperties() {
+        StringBuilder result = new StringBuilder();
+
         Gson gson = new Gson();
-        return gson.toJson(partitionIdToOffset);
+        result.append("Progress:").append(gson.toJson(partitionIdToOffset));
+        result.append(",");
+        result.append("LatestOffset:").append(gson.toJson(latestPartOffset));
+        return result.toString();
+    }
+
+    public Map<Integer, Long> getLatestOffset() {
+        return latestPartOffset;
     }
 
     private TExecPlanFragmentParams plan(RoutineLoadJob routineLoadJob) throws UserException {

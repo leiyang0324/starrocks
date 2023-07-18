@@ -16,64 +16,86 @@ package com.starrocks.storagevolume;
 
 import com.google.common.collect.Lists;
 import com.google.gson.Gson;
+import com.google.gson.annotations.SerializedName;
 import com.staros.proto.AwsCredentialInfo;
+import com.staros.proto.AzBlobCredentialInfo;
+import com.staros.proto.AzBlobFileStoreInfo;
 import com.staros.proto.FileStoreInfo;
 import com.staros.proto.S3FileStoreInfo;
-import com.starrocks.common.AnalysisException;
+import com.starrocks.common.io.Text;
+import com.starrocks.common.io.Writable;
 import com.starrocks.common.proc.BaseProcResult;
 import com.starrocks.credential.CloudConfiguration;
 import com.starrocks.credential.CloudConfigurationConstants;
 import com.starrocks.credential.CloudConfigurationFactory;
 import com.starrocks.credential.CloudType;
+import com.starrocks.credential.hdfs.HDFSCloudCredential;
+import com.starrocks.persist.gson.GsonPostProcessable;
+import com.starrocks.persist.gson.GsonUtils;
 import com.starrocks.server.GlobalStateMgr;
+import com.starrocks.sql.analyzer.SemanticException;
 import org.apache.parquet.Strings;
 
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class StorageVolume {
-    public static final String S3_PREFIX = "s3://";
+import static com.starrocks.credential.CloudConfigurationConstants.AZURE_BLOB_CONTAINER;
+import static com.starrocks.credential.CloudConfigurationConstants.HDFS_AUTHENTICATION;
 
+public class StorageVolume implements Writable, GsonPostProcessable {
     public enum StorageVolumeType {
         UNKNOWN,
         S3,
-        HDFS
+        HDFS,
+        AZBLOB
     }
 
     // Without id, the scenario like "create storage volume 'a', drop storage volume 'a', create storage volume 'a'"
     // can not be handled. They will be treated as the same storage volume.
+    @SerializedName("i")
     private String id;
 
+    @SerializedName("n")
     private String name;
 
+    @SerializedName("s")
     private StorageVolumeType svt;
 
+    @SerializedName("l")
     private List<String> locations;
 
     private CloudConfiguration cloudConfiguration;
 
+    @SerializedName("p")
     private Map<String, String> params;
 
+    @SerializedName("c")
     private String comment;
 
+    @SerializedName("e")
     private boolean enabled;
 
     public StorageVolume(String id, String name, String svt, List<String> locations,
-                         Map<String, String> params, boolean enabled, String comment) throws AnalysisException {
+                         Map<String, String> params, boolean enabled, String comment) {
         this.id = id;
         this.name = name;
         this.svt = toStorageVolumeType(svt);
         this.locations = new ArrayList<>(locations);
         this.comment = comment;
         this.enabled = enabled;
-        this.cloudConfiguration = CloudConfigurationFactory.buildCloudConfigurationForStorage(params);
-        if (!isValidCloudConfiguration()) {
-            throw new AnalysisException("Storage params is not valid");
-        }
         this.params = new HashMap<>(params);
+        Map<String, String> configurationParams = new HashMap<>(params);
+        preprocessAuthenticationIfNeeded(configurationParams);
+        this.cloudConfiguration = CloudConfigurationFactory.buildCloudConfigurationForStorage(configurationParams);
+        if (!isValidCloudConfiguration()) {
+            Gson gson = new Gson();
+            throw new SemanticException("Storage params is not valid " + gson.toJson(params));
+        }
     }
 
     public StorageVolume(StorageVolume sv) {
@@ -87,12 +109,13 @@ public class StorageVolume {
         this.params = new HashMap<>(sv.params);
     }
 
-    public void setCloudConfiguration(Map<String, String> params) throws AnalysisException {
+    public void setCloudConfiguration(Map<String, String> params) {
         Map<String, String> newParams = new HashMap<>(this.params);
         newParams.putAll(params);
         this.cloudConfiguration = CloudConfigurationFactory.buildCloudConfigurationForStorage(newParams);
         if (!isValidCloudConfiguration()) {
-            throw new AnalysisException("Storage params is not valid");
+            Gson gson = new Gson();
+            throw new SemanticException("Storage params is not valid " + gson.toJson(newParams));
         }
         this.params = newParams;
     }
@@ -131,6 +154,8 @@ public class StorageVolume {
                 return StorageVolumeType.S3;
             case "hdfs":
                 return StorageVolumeType.HDFS;
+            case "azblob":
+                return StorageVolumeType.AZBLOB;
             default:
                 return StorageVolumeType.UNKNOWN;
         }
@@ -142,6 +167,8 @@ public class StorageVolume {
                 return cloudConfiguration.getCloudType() == CloudType.AWS;
             case HDFS:
                 return cloudConfiguration.getCloudType() == CloudType.HDFS;
+            case AZBLOB:
+                return cloudConfiguration.getCloudType() == CloudType.AZURE;
             default:
                 return false;
         }
@@ -161,7 +188,7 @@ public class StorageVolume {
 
     public static FileStoreInfo createFileStoreInfo(String name, String svt,
                                                     List<String> locations, Map<String, String> params,
-                                                    boolean enabled, String comment) throws AnalysisException {
+                                                    boolean enabled, String comment) {
         StorageVolume sv = new StorageVolume("", name, svt, locations, params, enabled, comment);
         return sv.toFileStoreInfo();
     }
@@ -169,44 +196,16 @@ public class StorageVolume {
     public FileStoreInfo toFileStoreInfo() {
         FileStoreInfo fsInfo = cloudConfiguration.toFileStoreInfo();
         FileStoreInfo.Builder builder = fsInfo.toBuilder();
-        builder.setFsKey(id).setFsName(this.name).setComment(this.comment).setEnabled(this.enabled);
-        switch (svt) {
-            case S3:
-                S3FileStoreInfo s3FileStoreInfo = fsInfo.getS3FsInfo();
-                String[] bucketAndPrefix = getBucketAndPrefix();
-                s3FileStoreInfo = s3FileStoreInfo.toBuilder()
-                        .setBucket(bucketAndPrefix[0]).setPathPrefix(bucketAndPrefix[1]).build();
-                builder.setS3FsInfo(s3FileStoreInfo);
-                break;
-            case HDFS:
-                // TODO
-                break;
-            case UNKNOWN:
-                break;
-        }
+        builder.setFsKey(id).setFsName(this.name).setComment(this.comment).setEnabled(this.enabled)
+                .addAllLocations(locations).build();
         return builder.build();
     }
 
-    public static StorageVolume fromFileStoreInfo(FileStoreInfo fsInfo) throws AnalysisException {
+    public static StorageVolume fromFileStoreInfo(FileStoreInfo fsInfo) {
         String svt = fsInfo.getFsType().toString();
         Map<String, String> params = getParamsFromFileStoreInfo(fsInfo);
-        List<String> locations = getLocationsFromFileStoreInfo(fsInfo);
         return new StorageVolume(fsInfo.getFsKey(), fsInfo.getFsName(), svt,
-                locations, params, fsInfo.getEnabled(), fsInfo.getComment());
-    }
-
-    public static List<String> getLocationsFromFileStoreInfo(FileStoreInfo fsInfo) {
-        switch (fsInfo.getFsType()) {
-            case S3:
-                return new ArrayList<>(Arrays.asList(
-                        "S3://" + fsInfo.getS3FsInfo().getBucket() + "/" + fsInfo.getS3FsInfo().getPathPrefix()));
-            case HDFS:
-                // TODO
-            case AZBLOB:
-                // TODO
-            default:
-                return new ArrayList<>();
-        }
+                fsInfo.getLocationsList(), params, fsInfo.getEnabled(), fsInfo.getComment());
     }
 
     public static Map<String, String> getParamsFromFileStoreInfo(FileStoreInfo fsInfo) {
@@ -240,21 +239,47 @@ public class StorageVolume {
                 return params;
             case HDFS:
                 // TODO
+                return params;
             case AZBLOB:
-                // TODO
+                AzBlobFileStoreInfo azBlobFileStoreInfo = fsInfo.getAzblobFsInfo();
+                params.put(CloudConfigurationConstants.AZURE_BLOB_ENDPOINT, azBlobFileStoreInfo.getEndpoint());
+                AzBlobCredentialInfo azBlobcredentialInfo = azBlobFileStoreInfo.getCredential();
+                String sharedKey = azBlobcredentialInfo.getSharedKey();
+                if (!Strings.isNullOrEmpty(sharedKey)) {
+                    params.put(CloudConfigurationConstants.AZURE_BLOB_SHARED_KEY, sharedKey);
+                }
+                String sasToken = azBlobcredentialInfo.getSasToken();
+                if (!Strings.isNullOrEmpty(sasToken)) {
+                    params.put(CloudConfigurationConstants.AZURE_BLOB_SAS_TOKEN, sasToken);
+                }
+                return params;
             default:
                 return params;
         }
     }
 
-    private String[] getBucketAndPrefix() {
-        // path pattern: s3://default-bucket/1/12003/
-        String path = locations.get(0).substring(S3_PREFIX.length());
-        int index = path.indexOf('/');
-        if (index < 0) {
-            return new String[] {path, ""};
+    private void preprocessAuthenticationIfNeeded(Map<String, String> params) {
+        if (svt == StorageVolumeType.HDFS) {
+            params.computeIfAbsent(HDFS_AUTHENTICATION, key -> HDFSCloudCredential.EMPTY);
+        } else if (svt == StorageVolumeType.AZBLOB) {
+            String container = locations.get(0).split("/")[0];
+            params.put(AZURE_BLOB_CONTAINER, container);
         }
+    }
 
-        return new String[] {path.substring(0, index), path.substring(index + 1)};
+    @Override
+    public void write(DataOutput out) throws IOException {
+        String json = GsonUtils.GSON.toJson(this);
+        Text.writeString(out, json);
+    }
+
+    public static StorageVolume read(DataInput in) throws IOException {
+        String json = Text.readString(in);
+        return GsonUtils.GSON.fromJson(json, StorageVolume.class);
+    }
+
+    @Override
+    public void gsonPostProcess() throws IOException {
+        cloudConfiguration = CloudConfigurationFactory.buildCloudConfigurationForStorage(params);
     }
 }

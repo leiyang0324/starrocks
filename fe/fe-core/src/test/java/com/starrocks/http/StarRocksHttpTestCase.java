@@ -120,6 +120,7 @@ public abstract class StarRocksHttpTestCase {
     public static int HTTP_PORT;
 
     protected static String URI;
+    protected static String BASE_URL;
 
     protected String rootAuth = Credentials.basic("root", "");
 
@@ -211,11 +212,11 @@ public abstract class StarRocksHttpTestCase {
             //EasyMock.expect(globalStateMgr.getAuth()).andReturn(starrocksAuth).anyTimes();
             Database db = new Database(testDbId, "testDb");
             OlapTable table = newTable(TABLE_NAME);
-            db.createTable(table);
+            db.registerTableUnlocked(table);
             OlapTable table1 = newTable(TABLE_NAME + 1);
-            db.createTable(table1);
+            db.registerTableUnlocked(table1);
             EsTable esTable = newEsTable("es_table");
-            db.createTable(esTable);
+            db.registerTableUnlocked(esTable);
             new Expectations(globalStateMgr) {
                 {
                     globalStateMgr.getAuth();
@@ -278,11 +279,11 @@ public abstract class StarRocksHttpTestCase {
             //EasyMock.expect(globalStateMgr.getAuth()).andReturn(starrocksAuth).anyTimes();
             Database db = new Database(testDbId, "testDb");
             OlapTable table = newTable(TABLE_NAME);
-            db.createTable(table);
+            db.registerTableUnlocked(table);
             OlapTable table1 = newTable(TABLE_NAME + 1);
-            db.createTable(table1);
+            db.registerTableUnlocked(table1);
             EsTable esTable = newEsTable("es_table");
-            db.createTable(esTable);
+            db.registerTableUnlocked(esTable);
             new Expectations(globalStateMgr) {
                 {
                     globalStateMgr.getAuth();
@@ -365,6 +366,7 @@ public abstract class StarRocksHttpTestCase {
             socket = new ServerSocket(0);
             socket.setReuseAddress(true);
             HTTP_PORT = socket.getLocalPort();
+            BASE_URL = "http://localhost:" + HTTP_PORT;
             URI = "http://localhost:" + HTTP_PORT + "/api/" + DB_NAME + "/" + TABLE_NAME;
         } catch (Exception e) {
             throw new IllegalStateException("Could not find a free TCP/IP port to start HTTP Server on");
@@ -465,7 +467,7 @@ public abstract class StarRocksHttpTestCase {
                 };
 
                 return new GlobalTransactionMgr(null);
-            } 
+            }
         };
         assignBackends();
         doSetUp();

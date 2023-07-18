@@ -59,6 +59,7 @@ class TabletSchema;
 class ShortKeyIndexDecoder;
 
 class ChunkIterator;
+class IndexReadOptions;
 class Schema;
 class SegmentIterator;
 class SegmentReadOptions;
@@ -98,8 +99,9 @@ public:
                                                    const FooterPointerPB* partial_rowset_footer = nullptr,
                                                    bool skip_fill_local_cache = true);
 
-    static Status parse_segment_footer(RandomAccessFile* read_file, SegmentFooterPB* footer, size_t* footer_length_hint,
-                                       const FooterPointerPB* partial_rowset_footer);
+    [[nodiscard]] static Status parse_segment_footer(RandomAccessFile* read_file, SegmentFooterPB* footer,
+                                                     size_t* footer_length_hint,
+                                                     const FooterPointerPB* partial_rowset_footer);
 
     Segment(const private_type&, std::shared_ptr<FileSystem> fs, std::string path, uint32_t segment_id,
             const TabletSchema* tablet_schema);
@@ -112,14 +114,15 @@ public:
     // may return EndOfFile
     StatusOr<ChunkIteratorPtr> new_iterator(const Schema& schema, const SegmentReadOptions& read_options);
 
-    StatusOr<std::shared_ptr<Segment>> new_dcg_segment(const DeltaColumnGroup& dcg);
+    StatusOr<std::shared_ptr<Segment>> new_dcg_segment(const DeltaColumnGroup& dcg, uint32_t idx);
 
     uint64_t id() const { return _segment_id; }
 
     // TODO: remove this method, create `ColumnIterator` via `ColumnReader`.
     StatusOr<std::unique_ptr<ColumnIterator>> new_column_iterator(uint32_t cid, ColumnAccessPath* path = nullptr);
 
-    Status new_bitmap_index_iterator(uint32_t cid, BitmapIndexIterator** iter, bool skip_fill_local_cache);
+    [[nodiscard]] Status new_bitmap_index_iterator(uint32_t cid, const IndexReadOptions& options,
+                                                   BitmapIndexIterator** iter);
 
     size_t num_short_keys() const { return _tablet_schema->num_short_key_columns(); }
 
@@ -161,12 +164,15 @@ public:
 
     // Load and decode short key index.
     // May be called multiple times, subsequent calls will no op.
-    Status load_index(bool skip_fill_local_cache = true);
+    [[nodiscard]] Status load_index(bool skip_fill_local_cache = true);
     bool has_loaded_index() const;
 
     const ShortKeyIndexDecoder* decoder() const { return _sk_index_decoder.get(); }
 
     int64_t mem_usage() { return _basic_info_mem_usage() + _short_key_index_mem_usage(); }
+
+    // read short_key_index, for data check, just used in unit test now
+    [[nodiscard]] Status get_short_key_index(std::vector<std::string>* sk_index_values);
 
     DISALLOW_COPY_AND_MOVE(Segment);
 

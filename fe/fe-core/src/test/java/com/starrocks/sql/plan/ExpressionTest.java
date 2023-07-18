@@ -15,6 +15,7 @@
 package com.starrocks.sql.plan;
 
 import com.google.common.collect.Lists;
+import com.starrocks.analysis.BinaryType;
 import com.starrocks.analysis.CastExpr;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.IntLiteral;
@@ -237,7 +238,7 @@ public class ExpressionTest extends PlanTestBase {
         Assert.assertTrue(castExpression instanceof CastExpr);
 
         // lambda functions
-        ScalarOperator lambdaExpr = new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.EQ,
+        ScalarOperator lambdaExpr = new BinaryPredicateOperator(BinaryType.EQ,
                 new ColumnRefOperator(100000, Type.INT, "x", true),
                 ConstantOperator.createInt(1));
         ColumnRefOperator colRef = new ColumnRefOperator(100000, Type.INT, "x", true);
@@ -833,55 +834,55 @@ public class ExpressionTest extends PlanTestBase {
 
         sql = "select v1 from t0 where  v1 / 2 <=> 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: CAST(1: v1 AS DOUBLE) <=> 6.0"));
+        assertContains(planFragment, "PREDICATES: 1: v1 <=> 6");
 
         sql = "select v1 from t0 where  v1 / -2 > 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: CAST(1: v1 AS DOUBLE) < -6.0"));
+        assertContains(planFragment, "PREDICATES: 1: v1 < -6");
 
         sql = "select v1 from t0 where  v1 / abs(-2) > 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: CAST(1: v1 AS DOUBLE) / CAST(abs(-2) AS DOUBLE) > 3.0"));
+        assertContains(planFragment, "PREDICATES: CAST(1: v1 AS DOUBLE) / CAST(abs(-2) AS DOUBLE) > 3.0");
 
         sql = "select v1 from t0 where  v1 / -2 != 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: CAST(1: v1 AS DOUBLE) != -6.0"));
+        assertContains(planFragment, "PREDICATES: 1: v1 != -6");
 
         sql = "select v1 from t0 where  v1 / abs(-2) = 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: CAST(1: v1 AS DOUBLE) = 3.0 * CAST(abs(-2) AS DOUBLE)"));
+        assertContains(planFragment, "PREDICATES: CAST(1: v1 AS DOUBLE) = 3.0 * CAST(abs(-2) AS DOUBLE)");
 
         sql = "select v1 from t0 where 2 + v1 <= 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 1: v1 <= 1"));
+        assertContains(planFragment, "PREDICATES: 1: v1 <= 1");
 
         sql = "select v1 from t0 where 2 - v1 <= 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 1: v1 >= -1"));
+        assertContains(planFragment, "PREDICATES: 1: v1 >= -1");
 
         sql = "select k5 from bigtable where k5 * 2 <= 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 5: k5 * 2 <= 3"));
+        assertContains(planFragment, "PREDICATES: 5: k5 * 2 <= 3");
 
         sql = "select k5 from bigtable where 2 / k5 <= 3";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 2 / CAST(5: k5 AS DECIMAL128(38,3)) <= 3"));
+        assertContains(planFragment, "PREDICATES: 2 / CAST(5: k5 AS DECIMAL128(38,3)) <= 3");
 
         sql = "select t1a from test_all_type where date_add(id_datetime, 2) = '2020-12-21'";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 8: id_datetime = '2020-12-19 00:00:00'"));
+        assertContains(planFragment, "PREDICATES: 8: id_datetime = '2020-12-19 00:00:00'");
 
         sql = "select t1a from test_all_type where date_sub(id_datetime, 2) = '2020-12-21'";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 8: id_datetime = '2020-12-23 00:00:00'"));
+        assertContains(planFragment, "PREDICATES: 8: id_datetime = '2020-12-23 00:00:00'");
 
         sql = "select t1a from test_all_type where years_sub(id_datetime, 2) = '2020-12-21'";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 8: id_datetime = '2022-12-21 00:00:00'"));
+        assertContains(planFragment, "PREDICATES: 8: id_datetime = '2022-12-21 00:00:00'");
 
         sql = "select t1a from test_all_type where years_add(id_datetime, 2) = '2020-12-21'";
         planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("PREDICATES: 8: id_datetime = '2018-12-21 00:00:00'"));
+        assertContains(planFragment, "PREDICATES: 8: id_datetime = '2018-12-21 00:00:00'");
     }
 
     @Test
@@ -1153,8 +1154,8 @@ public class ExpressionTest extends PlanTestBase {
     public void testProjectUsingConstantArgs() throws Exception {
         String sql = "select months_diff(\"2074-03-04T17:43:24\", \"2074-03-04T17:43:24\") from test_all_type";
         String planFragment = getFragmentPlan(sql);
-        Assert.assertTrue(planFragment.contains("1:Project\n"
-                + "  |  <slot 11> : months_diff(12: cast, 12: cast)"));
+        Assert.assertTrue(planFragment, planFragment.contains("1:Project\n"
+                + "  |  <slot 11> : months_diff('2074-03-04 17:43:24', '2074-03-04 17:43:24')\n"));
     }
 
     @Test
@@ -1223,6 +1224,10 @@ public class ExpressionTest extends PlanTestBase {
         plan = getFragmentPlan(sql);
         assertContains(plan, "predicates: 11: cume_dist() = 1");
 
+        sql = "select tc from tall qualify percent_rank() OVER(PARTITION by ta order by tg) = 1;";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "predicates: 11: percent_rank() = 1");
+
         // for '<'
         sql = "select tc from tall qualify row_number() OVER(PARTITION by ta order by tg) < 1;";
         plan = getFragmentPlan(sql);
@@ -1240,6 +1245,10 @@ public class ExpressionTest extends PlanTestBase {
         plan = getFragmentPlan(sql);
         assertContains(plan, "predicates: 11: cume_dist() < 1");
 
+        sql = "select tc from tall qualify percent_rank() OVER(PARTITION by ta order by tg) < 1;";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "predicates: 11: percent_rank() < 1");
+
         // for '>'
         sql = "select tc from tall qualify row_number() OVER(PARTITION by ta order by tg) > 1;";
         plan = getFragmentPlan(sql);
@@ -1256,6 +1265,10 @@ public class ExpressionTest extends PlanTestBase {
         sql = "select tc from tall qualify cume_dist() OVER(PARTITION by ta order by tg) > 1;";
         plan = getFragmentPlan(sql);
         assertContains(plan, "predicates: 11: cume_dist() > 1");
+
+        sql = "select tc from tall qualify percent_rank() OVER(PARTITION by ta order by tg) > 1;";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "predicates: 11: percent_rank() > 1");
 
         // for alias
         sql = "select ta as col1 from tall qualify dense_rank() OVER(PARTITION by ta order by tg) > 1;";
@@ -1473,7 +1486,7 @@ public class ExpressionTest extends PlanTestBase {
         String plan = getVerboseExplain(sql);
         assertCContains(plan, "struct<col1 varchar, col2 tinyint(4), col3 tinyint(4), col4 smallint(6)>");
 
-        sql = "select row('a', 1, 2, 10000, [1, 2, 3], NULL, {'a': 1, 'b': 2})";
+        sql = "select row('a', 1, 2, 10000, [1, 2, 3], NULL, map{'a': 1, 'b': 2})";
         plan = getVerboseExplain(sql);
         assertCContains(plan, "struct<col1 varchar, col2 tinyint(4), col3 tinyint(4), col4 smallint(6), " +
                 "col5 array<tinyint(4)>, col6 boolean, col7 map<varchar,tinyint(4)>>");
@@ -1509,5 +1522,68 @@ public class ExpressionTest extends PlanTestBase {
         String sql = "select row('a', 1, 'a', 2).col1";
         String plan = getVerboseExplain(sql);
         assertCContains(plan, "row('a', 1, 'a', 2).col1");
+    }
+
+    @Test
+    public void testStructCollection() throws Exception {
+        String sql = "select row('a', 1, 'a', 2)[1]";
+        String plan = getVerboseExplain(sql);
+        assertCContains(plan, "row('a', 1, 'a', 2).col1");
+
+        sql = "select row('a', 1, 'a', 2)[4]";
+        plan = getVerboseExplain(sql);
+        assertCContains(plan, "row('a', 1, 'a', 2).col4");
+
+        sql = "select row('a', 1, 'a', 2)[4]";
+        plan = getVerboseExplain(sql);
+        assertCContains(plan, "row('a', 1, 'a', 2).col4");
+
+        sql = "select row('a', 1, 'a', 2)[-1]";
+        plan = getVerboseExplain(sql);
+        assertCContains(plan, "row('a', 1, 'a', 2).col4");
+
+        sql = "select row('a', 1, 'a', 2)[-4]";
+        plan = getVerboseExplain(sql);
+        assertCContains(plan, "row('a', 1, 'a', 2).col1");
+    }
+
+    @Test
+    public void testJsonArray() throws Exception {
+        String sql = "select array_distinct([PARSE_JSON('{1: 2}')])";
+        String plan = getVerboseExplain(sql);
+        assertCContains(plan, "array_distinct[([parse_json('{1: 2}')]); args: INVALID_TYPE; result: ARRAY<JSON>;");
+
+        sql = "select array_distinct([NULL])";
+        plan = getVerboseExplain(sql);
+        assertCContains(plan, "array_distinct[([NULL]); args: INVALID_TYPE; result: ARRAY<BOOLEAN>;");
+    }
+
+    @Test
+    public void testDoubleCastToString() throws Exception {
+        String sql = "select concat(substr(DATE_SUB(CURDATE(), INTERVAL 1 DAY), 1, 4) -1, '-');";
+        String plan = getVerboseExplain(sql);
+        assertContains(plan, "2022-");
+
+        sql = "select cast(cast(20.00 as double) as string);";
+        plan = getVerboseExplain(sql);
+        assertContains(plan, "'20'");
+    }
+
+    @Test
+    public void testCastTDatetime() throws Exception {
+        String sql = "select cast('2020-05-01T13:45:57' as date);";
+        String plan = getVerboseExplain(sql);
+        assertContains(plan, "'2020-05-01'");
+
+        sql = "select cast('2020-05-01T13:45:57' as datetime);";
+        plan = getVerboseExplain(sql);
+        assertContains(plan, "2020-05-01 13:45:57");
+    }
+
+    @Test
+    public void testDecimalCastString() throws  Exception {
+        String sql = "select cast(cast('1.10000' as decimal(27,9)) as string)";
+        String plan = getVerboseExplain(sql);
+        assertContains(plan, "1.100000000");
     }
 }

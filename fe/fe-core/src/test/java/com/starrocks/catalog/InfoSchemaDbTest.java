@@ -16,7 +16,7 @@ package com.starrocks.catalog;
 
 import com.starrocks.analysis.FunctionName;
 import com.starrocks.catalog.system.information.InfoSchemaDb;
-import com.starrocks.catalog.system.starrocks.GrantsTo;
+import com.starrocks.catalog.system.sys.GrantsTo;
 import com.starrocks.common.AnalysisException;
 import com.starrocks.privilege.AuthorizationMgr;
 import com.starrocks.qe.ConnectContext;
@@ -82,9 +82,7 @@ public class InfoSchemaDbTest {
     public void testNormal() throws IOException {
         Database db = new InfoSchemaDb();
 
-        Assert.assertFalse(db.createTable(null));
-        Assert.assertFalse(db.createMaterializedWithLock(null, false));
-        Assert.assertFalse(db.createTableWithLock(null, false));
+        Assert.assertFalse(db.registerTableUnlocked(null));
         db.dropTable("authors");
         db.dropTableWithLock("authors");
         db.write(null);
@@ -105,14 +103,14 @@ public class InfoSchemaDbTest {
         item.setObject_type("DATABASE");
         item.setPrivilege_type("DROP");
         item.setIs_grantable(false);
-        Assert.assertTrue(response.grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
 
         item = new TGetGrantsToRolesOrUserItem();
         item.setGrantee("root");
         item.setObject_type("SYSTEM");
         item.setPrivilege_type("CREATE GLOBAL FUNCTION");
         item.setIs_grantable(false);
-        Assert.assertTrue(response.grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
 
         item = new TGetGrantsToRolesOrUserItem();
         item.setGrantee("root");
@@ -122,7 +120,7 @@ public class InfoSchemaDbTest {
         item.setObject_type("VIEW");
         item.setPrivilege_type("DROP");
         item.setIs_grantable(false);
-        Assert.assertTrue(response.grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
     }
 
     @Test
@@ -146,7 +144,7 @@ public class InfoSchemaDbTest {
         sql = "revoke DROP on database db from test_user";
         RevokePrivilegeStmt revokePrivilegeStmt = (RevokePrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
         authorizationManager.revoke(revokePrivilegeStmt);
-        Assert.assertFalse(GrantsTo.getGrantsTo(request).grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
 
         sql = "grant drop on all databases to test_user";
         grantStmt = (GrantPrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
@@ -163,7 +161,7 @@ public class InfoSchemaDbTest {
         sql = "revoke DROP on all databases from test_user";
         revokePrivilegeStmt = (RevokePrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
         authorizationManager.revoke(revokePrivilegeStmt);
-        Assert.assertFalse(GrantsTo.getGrantsTo(request).grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
     }
 
     @Test
@@ -188,7 +186,7 @@ public class InfoSchemaDbTest {
         sql = "revoke select on db.tbl from test_user";
         RevokePrivilegeStmt revokePrivilegeStmt = (RevokePrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
         authorizationManager.revoke(revokePrivilegeStmt);
-        Assert.assertFalse(GrantsTo.getGrantsTo(request).grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
     }
 
     @Test
@@ -213,7 +211,7 @@ public class InfoSchemaDbTest {
         sql = "revoke select on view db.v from test_user";
         RevokePrivilegeStmt revokePrivilegeStmt = (RevokePrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
         authorizationManager.revoke(revokePrivilegeStmt);
-        Assert.assertFalse(GrantsTo.getGrantsTo(request).grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
 
         sql = "grant drop on all views in database db to test_user";
         grantStmt = (GrantPrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
@@ -231,7 +229,7 @@ public class InfoSchemaDbTest {
         sql = "revoke DROP on all views in database db from test_user";
         revokePrivilegeStmt = (RevokePrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
         authorizationManager.revoke(revokePrivilegeStmt);
-        Assert.assertFalse(GrantsTo.getGrantsTo(request).grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
     }
 
     @Test
@@ -254,7 +252,7 @@ public class InfoSchemaDbTest {
         sql = "revoke impersonate on user test_user2 from test_user";
         RevokePrivilegeStmt revokePrivilegeStmt = (RevokePrivilegeStmt) UtFrameUtils.parseStmtWithNewParser(sql, ctx);
         authorizationManager.revoke(revokePrivilegeStmt);
-        Assert.assertFalse(GrantsTo.getGrantsTo(request).grants_to.contains(item));
+        Assert.assertFalse(GrantsTo.getGrantsTo(request).isSetGrants_to());
     }
 
 

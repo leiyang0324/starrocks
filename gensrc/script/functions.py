@@ -56,6 +56,8 @@ vectorized_functions = [
     [10090, "tan", "DOUBLE", ["DOUBLE"], "MathFunctions::tan"],
     [10100, "atan", "DOUBLE", ["DOUBLE"], "MathFunctions::atan"],
     [10101, "tanh", "DOUBLE", ["DOUBLE"], "MathFunctions::tanh"],
+    [10102, "cosine_similarity", "FLOAT", ["ARRAY_FLOAT", "ARRAY_FLOAT"], "MathFunctions::cosine_similarity<TYPE_FLOAT, false>"],
+    [10103, "cosine_similarity_norm", "FLOAT", ["ARRAY_FLOAT", "ARRAY_FLOAT"], "MathFunctions::cosine_similarity<TYPE_FLOAT, true>"],
 
     [10110, "ceil", "BIGINT", ["DOUBLE"], "MathFunctions::ceil"],
     [10111, "ceiling", "BIGINT", ["DOUBLE"], "MathFunctions::ceil"],
@@ -313,6 +315,8 @@ vectorized_functions = [
     [30410, 'parse_url', 'VARCHAR', ['VARCHAR', 'VARCHAR'], 'StringFunctions::parse_url',
      'StringFunctions::parse_url_prepare', 'StringFunctions::parse_url_close'],
     [30420, 'strcmp', 'INT', ['VARCHAR', 'VARCHAR'], 'StringFunctions::strcmp'],
+    [30421, 'url_encode', 'VARCHAR', ['VARCHAR'], 'StringFunctions::url_encode'],
+    [30422, 'url_decode', 'VARCHAR', ['VARCHAR'], 'StringFunctions::url_decode'],
 
     # Binary Functions
     # to_binary
@@ -336,6 +340,7 @@ vectorized_functions = [
     [50020, 'month', 'INT', ['DATETIME'], 'TimeFunctions::month'],
     [50030, 'quarter', 'INT', ['DATETIME'], 'TimeFunctions::quarter'],
     [50040, 'dayofweek', 'INT', ['DATETIME'], 'TimeFunctions::day_of_week'],
+    [50041, 'dayofweek_iso', 'INT', ['DATETIME'], 'TimeFunctions::day_of_week_iso'],
     [50050, 'to_date', 'DATE', ['DATETIME'], 'TimeFunctions::to_date'],
     [50051, 'date', 'DATE', ['DATETIME'], 'TimeFunctions::to_date'],
 
@@ -359,6 +364,8 @@ vectorized_functions = [
 
     [50110, 'years_add', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::years_add'],
     [50111, 'years_sub', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::years_sub'],
+    [50115, 'quarters_add', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::quarters_add'],
+    [50116, 'quarters_sub', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::quarters_sub'],
     [50120, 'months_add', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::months_add'],
     [50121, 'months_sub', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::months_sub'],
     [50122, 'add_months', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::months_add'],
@@ -379,6 +386,8 @@ vectorized_functions = [
     [50161, 'minutes_sub', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::minutes_sub'],
     [50170, 'seconds_add', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::seconds_add'],
     [50171, 'seconds_sub', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::seconds_sub'],
+    [50175, 'milliseconds_add', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::millis_add'],
+    [50176, 'milliseconds_sub', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::millis_sub'],
     [50180, 'microseconds_add', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::micros_add'],
     [50181, 'microseconds_sub', 'DATETIME', ['DATETIME', 'INT'], 'TimeFunctions::micros_sub'],
     [50190, 'years_diff', 'BIGINT', ['DATETIME', 'DATETIME'], 'TimeFunctions::years_diff'],
@@ -390,6 +399,7 @@ vectorized_functions = [
     [50196, 'seconds_diff', 'BIGINT', ['DATETIME', 'DATETIME'], 'TimeFunctions::seconds_diff'],
     [50197, 'datediff', 'INT', ['DATETIME', 'DATETIME'], 'TimeFunctions::date_diff'],
     [50198, 'timediff', 'TIME', ['DATETIME', 'DATETIME'], 'TimeFunctions::time_diff'],
+    [50199, 'date_diff', 'BIGINT', ['DATETIME', 'DATETIME', 'VARCHAR'], 'TimeFunctions::datediff',"TimeFunctions::datediff_prepare", "TimeFunctions::datediff_close"],
     [50200, 'now', 'DATETIME', [], 'TimeFunctions::now'],
     [50201, 'current_timestamp', 'DATETIME', [], 'TimeFunctions::now'],
     [50202, 'localtime', 'DATETIME', [], 'TimeFunctions::now'],
@@ -409,6 +419,8 @@ vectorized_functions = [
     # cast string to date, the function will call by FE getStrToDateFunction, and is invisible to user
     [50243, 'str2date', 'DATE', ['VARCHAR', 'VARCHAR'], 'TimeFunctions::str2date', 'TimeFunctions::str_to_date_prepare', 'TimeFunctions::str_to_date_close'],
     [50250, 'time_to_sec', 'BIGINT', ['TIME'], 'TimeFunctions::time_to_sec'],
+    [50260, 'jodatime_format', 'VARCHAR', ['DATETIME', 'VARCHAR'], 'TimeFunctions::jodadatetime_format', 'TimeFunctions::jodatime_format_prepare', 'TimeFunctions::jodatime_format_close'],
+    [50261, 'jodatime_format', 'VARCHAR', ['DATE', 'VARCHAR'], 'TimeFunctions::jodadate_format', 'TimeFunctions::jodatime_format_prepare', 'TimeFunctions::jodatime_format_close'],
 
     # unix timestamp extended version to int64
     # be sure to put before int32 version, so fe will find signature in order.
@@ -933,6 +945,9 @@ vectorized_functions = [
     [150282, 'array_contains_all', 'BOOLEAN', ['ANY_ARRAY', 'ANY_ARRAY'], 'ArrayFunctions::array_contains_all'],
 
     [150300, 'array_filter', 'ANY_ARRAY',   ['ANY_ARRAY', 'ARRAY_BOOLEAN'],   'ArrayFunctions::array_filter'],
+    [150301, 'all_match', 'BOOLEAN',   ['ARRAY_BOOLEAN'],   'ArrayFunctions::all_match'],
+    [150302, 'any_match', 'BOOLEAN',   ['ARRAY_BOOLEAN'],   'ArrayFunctions::any_match'],
+
 
     [150311, 'array_sortby', 'ANY_ARRAY',  ['ANY_ARRAY', 'ARRAY_BOOLEAN'],   'ArrayFunctions::array_sortby<TYPE_BOOLEAN>'],
     [150312, 'array_sortby', 'ANY_ARRAY',  ['ANY_ARRAY', 'ARRAY_TINYINT'],   'ArrayFunctions::array_sortby<TYPE_TINYINT>'],

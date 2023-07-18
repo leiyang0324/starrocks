@@ -28,10 +28,9 @@
 #include "util/phmap/phmap.h"
 #include "util/stack_util.h"
 #include "util/time.h"
+#include "util/trace.h"
 
-namespace starrocks {
-
-namespace lake {
+namespace starrocks::lake {
 
 RowsetUpdateState::RowsetUpdateState() = default;
 
@@ -49,16 +48,19 @@ Status RowsetUpdateState::load(const TxnLogPB_OpWrite& op_write, const TabletMet
     std::call_once(_load_once_flag, [&] {
         _base_version = base_version;
         _builder = builder;
+        _tablet_id = metadata.id();
         _status = _do_load(op_write, metadata, tablet);
         if (!_status.ok()) {
-            LOG(WARNING) << "load RowsetUpdateState error: " << _status << " tablet:" << _tablet_id << " stack:\n"
-                         << get_stack_trace();
+            if (!_status.is_uninitialized()) {
+                LOG(WARNING) << "load RowsetUpdateState error: " << _status << " tablet:" << _tablet_id << " stack:\n"
+                             << get_stack_trace();
+            }
             if (_status.is_mem_limit_exceeded()) {
                 LOG(WARNING) << CurrentThread::mem_tracker()->debug_string();
             }
         }
     });
-    if (need_resolve_conflict) {
+    if (need_resolve_conflict && _status.ok()) {
         RETURN_IF_ERROR(_resolve_conflict(op_write, metadata, base_version, tablet, builder));
     }
     return _status;
@@ -160,10 +162,6 @@ void RowsetUpdateState::plan_read_by_rssid(const std::vector<uint64_t>& rowids, 
 
 Status RowsetUpdateState::_do_load_upserts_deletes(const TxnLogPB_OpWrite& op_write, const TabletSchema& tablet_schema,
                                                    Tablet* tablet, Rowset* rowset_ptr) {
-    std::stringstream cost_str;
-    MonotonicStopWatch watch;
-    watch.start();
-
     vector<uint32_t> pk_columns;
     for (size_t i = 0; i < tablet_schema.num_key_columns(); i++) {
         pk_columns.push_back((uint32_t)i);
@@ -188,8 +186,9 @@ Status RowsetUpdateState::_do_load_upserts_deletes(const TxnLogPB_OpWrite& op_wr
         }
         _deletes.emplace_back(std::move(col));
     }
-    cost_str << " [read deletes] " << watch.elapsed_time();
-    watch.reset();
+    if (op_write.dels_size() > 0) {
+        TRACE("end read $0 deletes files", op_write.dels_size());
+    }
 
     OlapReaderStatistics stats;
     auto res = rowset_ptr->get_each_segment_iterator(pkey_schema, &stats);
@@ -225,13 +224,16 @@ Status RowsetUpdateState::_do_load_upserts_deletes(const TxnLogPB_OpWrite& op_wr
         }
         dest = std::move(col);
     }
-    cost_str << " [read upserts] " << watch.elapsed_time();
-    LOG(INFO) << "RowsetUpdateState do_load cost: " << cost_str.str();
+    if (itrs.size() > 0) {
+        TRACE("end read $0 upserts files", itrs.size());
+    }
 
     for (const auto& upsert : _upserts) {
+        upsert->raw_data();
         _memory_usage += upsert != nullptr ? upsert->memory_usage() : 0;
     }
     for (const auto& one_delete : _deletes) {
+        one_delete->raw_data();
         _memory_usage += one_delete != nullptr ? one_delete->memory_usage() : 0;
     }
 
@@ -297,8 +299,7 @@ Status RowsetUpdateState::_prepare_auto_increment_partial_update_states(const Tx
     }
     DCHECK_EQ(_upserts.size(), num_segments);
     // use upserts to get rowids in each segment
-    RETURN_IF_ERROR(tablet->update_mgr()->get_rowids_from_pkindex(tablet, metadata, _upserts, _base_version, _builder,
-                                                                  &rss_rowids));
+    RETURN_IF_ERROR(tablet->update_mgr()->get_rowids_from_pkindex(tablet, _base_version, _upserts, &rss_rowids));
 
     for (size_t i = 0; i < num_segments; i++) {
         std::vector<uint32_t> rowids;
@@ -324,11 +325,11 @@ Status RowsetUpdateState::_prepare_auto_increment_partial_update_states(const Tx
 
         if (new_rows > 0) {
             uint32_t last = idxes.size() - new_rows;
-            for (int i = 0; i < idxes.size(); ++i) {
-                if (idxes[i] != 0) {
-                    --idxes[i];
+            for (unsigned int& idx : idxes) {
+                if (idx != 0) {
+                    --idx;
                 } else {
-                    idxes[i] = last;
+                    idx = last;
                     ++last;
                 }
             }
@@ -361,8 +362,7 @@ Status RowsetUpdateState::_prepare_auto_increment_partial_update_states(const Tx
 
         // just check the rows which are not exist in the previous version
         // because the rows exist in the previous version may contain 0 which are specified by the user
-        for (int j = 0; j < _auto_increment_partial_update_states[i].rowids.size(); ++j) {
-            uint32_t row_idx = _auto_increment_partial_update_states[i].rowids[j];
+        for (unsigned int row_idx : _auto_increment_partial_update_states[i].rowids) {
             if (data[row_idx] == 0) {
                 delete_idxes.emplace_back(row_idx);
             }
@@ -407,8 +407,7 @@ Status RowsetUpdateState::_prepare_partial_update_states(const TxnLogPB_OpWrite&
     }
     DCHECK_EQ(_upserts.size(), num_segments);
     // use upserts to get rowids in each segment
-    RETURN_IF_ERROR(tablet->update_mgr()->get_rowids_from_pkindex(tablet, metadata, _upserts, _base_version, _builder,
-                                                                  &rss_rowids));
+    RETURN_IF_ERROR(tablet->update_mgr()->get_rowids_from_pkindex(tablet, _base_version, _upserts, &rss_rowids));
 
     int64_t t_read_values = MonotonicMillis();
     size_t total_rows = 0;
@@ -444,8 +443,6 @@ Status RowsetUpdateState::_prepare_partial_update_states(const TxnLogPB_OpWrite&
 
 Status RowsetUpdateState::rewrite_segment(const TxnLogPB_OpWrite& op_write, const TabletMetadata& metadata,
                                           Tablet* tablet) {
-    MonotonicStopWatch watch;
-    watch.start();
     // const_cast for paritial update to rewrite segment file in op_write
     RowsetMetadata* rowset_meta = const_cast<TxnLogPB_OpWrite*>(&op_write)->mutable_rowset();
     auto root_path = tablet->metadata_root_location();
@@ -477,7 +474,7 @@ Status RowsetUpdateState::rewrite_segment(const TxnLogPB_OpWrite& op_write, cons
     std::vector<bool> need_rename(rowset_meta->segments_size(), true);
     for (int i = 0; i < rowset_meta->segments_size(); i++) {
         auto src_path = rowset_meta->segments(i);
-        auto dest_path = op_write.rewrite_segments(i);
+        const auto& dest_path = op_write.rewrite_segments(i);
 
         int64_t t_rewrite_start = MonotonicMillis();
         if (op_write.txn_meta().has_auto_increment_partial_update_column_id() &&
@@ -488,7 +485,7 @@ Status RowsetUpdateState::rewrite_segment(const TxnLogPB_OpWrite& op_write, cons
                     _partial_update_states.size() != 0 ? &_partial_update_states[i].write_columns : nullptr, op_write,
                     tablet));
         } else if (_partial_update_states.size() != 0) {
-            FooterPointerPB partial_rowset_footer = txn_meta.partial_rowset_footers(i);
+            const FooterPointerPB& partial_rowset_footer = txn_meta.partial_rowset_footers(i);
             // if rewrite fail, let segment gc to clean dest segment file
             RETURN_IF_ERROR(SegmentRewriter::rewrite(
                     tablet->segment_location(src_path), tablet->segment_location(dest_path), *tablet_schema,
@@ -509,10 +506,7 @@ Status RowsetUpdateState::rewrite_segment(const TxnLogPB_OpWrite& op_write, cons
             rowset_meta->set_segments(i, op_write.rewrite_segments(i));
         }
     }
-
-    if (watch.elapsed_time() > /*100ms=*/100 * 1000 * 1000) {
-        LOG(INFO) << "RowsetUpdateState rewrite_segment cost(ms): " << watch.elapsed_time() / 1000000;
-    }
+    TRACE("end rewrite segment");
     return Status::OK();
 }
 
@@ -540,8 +534,8 @@ Status RowsetUpdateState::_resolve_conflict(const TxnLogPB_OpWrite& op_write, co
     for (uint32_t segment_id = 0; segment_id < num_segments; segment_id++) {
         new_rss_rowids_vec[segment_id].resize(_upserts[segment_id]->size());
     }
-    RETURN_IF_ERROR(tablet->update_mgr()->get_rowids_from_pkindex(tablet, metadata, _upserts, _base_version, _builder,
-                                                                  &new_rss_rowids_vec));
+    RETURN_IF_ERROR(
+            tablet->update_mgr()->get_rowids_from_pkindex(tablet, _base_version, _upserts, &new_rss_rowids_vec));
 
     size_t total_conflicts = 0;
     std::unique_ptr<TabletSchema> tablet_schema = std::make_unique<TabletSchema>(metadata.schema());
@@ -665,11 +659,11 @@ Status RowsetUpdateState::_resolve_conflict_auto_increment(const TxnLogPB_OpWrit
 
         if (new_rows > 0) {
             uint32_t last = idxes.size() - new_rows;
-            for (int i = 0; i < idxes.size(); ++i) {
-                if (idxes[i] != 0) {
-                    --idxes[i];
+            for (unsigned int& idx : idxes) {
+                if (idx != 0) {
+                    --idx;
                 } else {
-                    idxes[i] = last;
+                    idx = last;
                     ++last;
                 }
             }
@@ -699,8 +693,7 @@ Status RowsetUpdateState::_resolve_conflict_auto_increment(const TxnLogPB_OpWrit
 
         // just check the rows which are not exist in the previous version
         // because the rows exist in the previous version may contain 0 which are specified by the user
-        for (int j = 0; j < _auto_increment_partial_update_states[segment_id].rowids.size(); ++j) {
-            uint32_t row_idx = _auto_increment_partial_update_states[segment_id].rowids[j];
+        for (unsigned int row_idx : _auto_increment_partial_update_states[segment_id].rowids) {
             if (data[row_idx] == 0) {
                 delete_idxes.emplace_back(row_idx);
             }
@@ -722,6 +715,4 @@ std::string RowsetUpdateState::to_string() const {
     return strings::Substitute("RowsetUpdateState tablet:$0", _tablet_id);
 }
 
-} // namespace lake
-
-} // namespace starrocks
+} // namespace starrocks::lake

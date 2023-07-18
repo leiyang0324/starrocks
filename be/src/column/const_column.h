@@ -50,7 +50,10 @@ public:
 
     bool is_null(size_t index) const override { return _data->is_null(0); }
 
-    bool only_null() const override { return _data->is_null(0); }
+    bool only_null() const override {
+        DCHECK(_data->is_nullable() ? _data->is_null(0) : true);
+        return _data->is_nullable();
+    }
 
     bool has_null() const override { return _data->has_null(); }
 
@@ -174,6 +177,8 @@ public:
     size_t filter_range(const Filter& filter, size_t from, size_t to) override;
 
     int compare_at(size_t left, size_t right, const Column& rhs, int nan_direction_hint) const override;
+
+    int equals(size_t left, const Column& rhs, size_t right, bool safe_eq = true) const override;
 
     void fnv_hash(uint32_t* hash, uint32_t from, uint32_t to) const override;
 

@@ -57,6 +57,13 @@ public class AnalyzerUtilsTest {
     }
 
     @Test
+    public void testGetFormatPartitionValue() {
+        Assert.assertEquals("_11", AnalyzerUtils.getFormatPartitionValue("-11"));
+        Assert.assertEquals("20200101", AnalyzerUtils.getFormatPartitionValue("2020-01-01"));
+        Assert.assertEquals("676d5dde", AnalyzerUtils.getFormatPartitionValue("杭州"));
+    }
+
+    @Test
     public void testRewritePredicate() throws Exception {
         String sql = "select cast(substr(bill_code, 3, 13) as bigint) from bill_detail;";
         ConnectContext ctx = starRocksAssert.getCtx();

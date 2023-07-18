@@ -26,6 +26,7 @@ import com.starrocks.analysis.SlotRef;
 import com.starrocks.analysis.TableName;
 import com.starrocks.catalog.AggregateType;
 import com.starrocks.catalog.Column;
+import com.starrocks.catalog.Database;
 import com.starrocks.catalog.Index;
 import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.PartitionType;
@@ -136,9 +137,16 @@ public class CreateTableAnalyzer {
             throw new SemanticException(e.getMessage());
         }
 
-        String dbName = tableNameObject.getDb();
-        if (GlobalStateMgr.getCurrentState().getMetadataMgr().getDb(catalogName, dbName) == null) {
-            throw new SemanticException("Unknown database '%s'", dbName);
+        Database db = MetaUtils.getDatabase(catalogName, tableNameObject.getDb());
+
+        // check if table exists in db
+        db.readLock();
+        try {
+            if (db.getTable(tableName) != null && !statement.isSetIfNotExists()) {
+                ErrorReport.reportSemanticException(ErrorCode.ERR_TABLE_EXISTS_ERROR, tableName);
+            }
+        } finally {
+            db.readUnlock();
         }
 
         final String engineName = analyzeEngineName(statement.getEngineName(), catalogName).toLowerCase();
@@ -155,9 +163,9 @@ public class CreateTableAnalyzer {
                 }
                 throw new SemanticException("only primary key support sort key", keysPos);
             } else {
-                List<String> columnNames = 
-                            statement.getColumnDefs().stream().map(ColumnDef::getName).collect(Collectors.toList());
-                
+                List<String> columnNames =
+                        statement.getColumnDefs().stream().map(ColumnDef::getName).collect(Collectors.toList());
+
                 for (String column : statement.getSortKeys()) {
                     int idx = columnNames.indexOf(column);
                     if (idx == -1) {
@@ -276,11 +284,11 @@ public class CreateTableAnalyzer {
 
         boolean hasHll = false;
         boolean hasBitmap = false;
-        boolean hasJson = false;
+        boolean hasReplace = false;
         Set<String> columnSet = Sets.newTreeSet(String.CASE_INSENSITIVE_ORDER);
         for (ColumnDef columnDef : columnDefs) {
             try {
-                columnDef.analyze(statement.isOlapEngine());
+                columnDef.analyze(statement.isOlapEngine(), CatalogMgr.isInternalCatalog(catalogName), engineName);
             } catch (AnalysisException e) {
                 LOGGER.error("Column definition analyze failed.", e);
                 throw new SemanticException(e.getMessage());
@@ -294,8 +302,8 @@ public class CreateTableAnalyzer {
                 hasBitmap = columnDef.getType().isBitmapType();
             }
 
-            if (columnDef.getType().isJsonType()) {
-                hasJson = true;
+            if (columnDef.getAggregateType() != null && columnDef.getAggregateType().isReplaceFamily()) {
+                hasReplace = true;
             }
 
             if (!columnSet.add(columnDef.getName())) {
@@ -323,10 +331,6 @@ public class CreateTableAnalyzer {
                         throw new SemanticException(e.getMessage());
                     }
                 } else if (partitionDesc instanceof ExpressionPartitionDesc) {
-                    if (RunMode.getCurrentRunMode() == RunMode.SHARED_DATA) {
-                        throw new SemanticException("Cloud native table does not support automatic partition");
-                    }
-
                     ExpressionPartitionDesc expressionPartitionDesc = (ExpressionPartitionDesc) partitionDesc;
                     try {
                         expressionPartitionDesc.analyze(columnDefs, properties);
@@ -341,6 +345,9 @@ public class CreateTableAnalyzer {
 
             // analyze distribution
             if (distributionDesc == null) {
+                if (keysDesc.getKeysType() != KeysType.DUP_KEYS) {
+                    throw new SemanticException("Currently only support default distribution in DUP_KEYS");
+                }
                 if (ConnectContext.get().getSessionVariable().isAllowDefaultPartition()) {
                     if (properties == null) {
                         properties = Maps.newHashMap();
@@ -351,8 +358,10 @@ public class CreateTableAnalyzer {
                     distributionDesc = new RandomDistributionDesc();
                 }
             }
-            if (distributionDesc instanceof RandomDistributionDesc && keysDesc.getKeysType() != KeysType.DUP_KEYS) {
-                throw new SemanticException("Random distribution must be used in DUP_KEYS", distributionDesc.getPos());
+            if (distributionDesc instanceof RandomDistributionDesc && keysDesc.getKeysType() != KeysType.DUP_KEYS
+                    && !(keysDesc.getKeysType() == KeysType.AGG_KEYS && !hasReplace)) {
+                throw new SemanticException("Random distribution must be used in DUP_KEYS or AGG_KEYS without replace",
+                        distributionDesc.getPos());
             }
             distributionDesc.analyze(columnSet);
             statement.setDistributionDesc(distributionDesc);
@@ -406,6 +415,14 @@ public class CreateTableAnalyzer {
             }
         }
 
+        if (hasMaterializedColum && !statement.isOlapEngine()) {
+            throw new SemanticException("Generated Column only support olap table");
+        }
+
+        if (hasMaterializedColum && keysDesc.getKeysType() == KeysType.AGG_KEYS) {
+            throw new SemanticException("Generated Column does not support AGG table");
+        }
+
         Map<String, Column> columnsMap = Maps.newHashMap();
         for (Column column : columns) {
             columnsMap.put(column.getName(), column);
@@ -419,6 +436,10 @@ public class CreateTableAnalyzer {
                 throw new SemanticException("Materialized Column only support olap table");
             }
 
+            if (RunMode.allowCreateLakeTable()) {
+                throw new SemanticException("Table with Generated column can not be lake table");
+            }
+
             boolean found = false;
             for (Column column : columns) {
                 if (found && !column.isMaterializedColumn()) {
@@ -430,8 +451,8 @@ public class CreateTableAnalyzer {
 
                     ExpressionAnalyzer.analyzeExpression(expr, new AnalyzeState(), new Scope(RelationId.anonymous(),
                             new RelationFields(columns.stream().map(col -> new Field(
-                                    col.getName(), col.getType(), tableNameObject, null))
-                                        .collect(Collectors.toList()))), context);
+                                            col.getName(), col.getType(), tableNameObject, null))
+                                    .collect(Collectors.toList()))), context);
 
                     // check if contain aggregation
                     List<FunctionCallExpr> funcs = Lists.newArrayList();
@@ -459,8 +480,8 @@ public class CreateTableAnalyzer {
 
                     if (!column.getType().matchesType(expr.getType())) {
                         throw new SemanticException("Illege expression type for Materialized Column " +
-                                                    "Column Type: " + column.getType().toString() +
-                                                    ", Expression Type: " + expr.getType().toString());
+                                "Column Type: " + column.getType().toString() +
+                                ", Expression Type: " + expr.getType().toString());
                     }
 
                     found = true;

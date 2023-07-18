@@ -141,7 +141,7 @@ public:
         // check primary index cache's ref
         EXPECT_TRUE(_update_manager->TEST_check_primary_index_cache_ref(_tablet_metadata->id(), 1));
         ASSIGN_OR_ABORT(auto tablet, _tablet_manager->get_tablet(_tablet_metadata->id()));
-        tablet.delete_txn_log(_txn_id);
+        ASSERT_OK(tablet.delete_txn_log(_txn_id));
         _txn_id++;
         (void)ExecEnv::GetInstance()->lake_tablet_manager()->TEST_set_location_provider(_backup_location_provider);
         (void)fs::remove_all(kTestGroupPath);
@@ -275,7 +275,7 @@ TEST_F(AutoIncrementPartialUpdateTest, test_resolve_conflict) {
     std::vector<int64_t> auto_increment_ids;
     auto_increment_ids.resize(kChunkSize);
     std::iota(auto_increment_ids.begin(), auto_increment_ids.end(), 1);
-    
+
     auto chunk0 = generate_data(auto_increment_ids, false);
     auto chunk1 = generate_data(auto_increment_ids, true);
     auto indexes = std::vector<uint32_t>(kChunkSize);

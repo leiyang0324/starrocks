@@ -73,6 +73,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
@@ -155,9 +156,9 @@ public class ColocateTableIndex implements Writable {
     @SerializedName("ug")
     private Set<GroupId> unstableGroups = Sets.newHashSet();
     // lake group, in memory
-    private Set<GroupId> lakeGroups = Sets.newHashSet();
+    private final Set<GroupId> lakeGroups = Sets.newHashSet();
 
-    private transient ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final transient ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
     public ColocateTableIndex() {
 
@@ -219,22 +220,24 @@ public class ColocateTableIndex implements Writable {
     public GroupId addTableToGroup(long dbId, OlapTable tbl, String groupName, GroupId assignedGroupId,
                                    boolean isReplay)
             throws DdlException {
+        Preconditions.checkArgument(tbl.getDefaultDistributionInfo().supportColocate(),
+                "colocate not supported");
         writeLock();
         try {
-            boolean groupAlreadyExist = false;
-            GroupId groupId = null;
+            boolean groupAlreadyExist = true;
+            GroupId groupId;
             String fullGroupName = dbId + "_" + groupName;
 
             if (groupName2Id.containsKey(fullGroupName)) {
                 groupId = groupName2Id.get(fullGroupName);
-                groupAlreadyExist = true;
             } else {
                 if (assignedGroupId != null) {
-                    // use the given group id, eg, in replay process
+                    // use the given group id, eg, in replay process or cross db colocation
                     groupId = assignedGroupId;
                 } else {
                     // generate a new one
                     groupId = new GroupId(dbId, GlobalStateMgr.getCurrentState().getNextId());
+                    groupAlreadyExist = false;
                 }
                 HashDistributionInfo distributionInfo = (HashDistributionInfo) tbl.getDefaultDistributionInfo();
                 ColocateGroupSchema groupSchema = new ColocateGroupSchema(groupId,
@@ -242,12 +245,6 @@ public class ColocateTableIndex implements Writable {
                         tbl.getDefaultReplicationNum());
                 groupName2Id.put(fullGroupName, groupId);
                 group2Schema.put(groupId, groupSchema);
-            }
-
-            if (groupAlreadyExist) {
-                if (tbl.isCloudNativeTable() != lakeGroups.contains(groupId)) {
-                    throw new DdlException("Table type mismatch with colocate group type.");
-                }
             }
 
             if (tbl.isCloudNativeTable()) {
@@ -644,13 +641,22 @@ public class ColocateTableIndex implements Writable {
         }
     }
 
-    protected boolean validDbIdAndTableId(long dbId, long tableId) {
+    protected Optional<String> getTableName(long dbId, long tableId) {
+
         Database database = GlobalStateMgr.getCurrentState().getDb(dbId);
         if (database == null) {
-            return false;
+            return Optional.empty();
         }
-        return database.getTable(tableId) != null;
+        Table table = database.getTable(tableId);
+
+        if (table == null) {
+            return Optional.empty();
+        }
+
+        return Optional.of(table.getName());
     }
+
+
 
     /**
      * After the user executes `DROP TABLE`, we only throw tables into the recycle bin instead of deleting them
@@ -667,22 +673,25 @@ public class ColocateTableIndex implements Writable {
                 GroupId groupId = entry.getValue();
                 info.add(groupId.toString());
                 info.add(entry.getKey());
-                StringBuilder sb = new StringBuilder();
+                StringJoiner tblIdJoiner = new StringJoiner(", ");
+                StringJoiner tblNameJoiner = new StringJoiner(", ");
                 for (Long tableId : group2Tables.get(groupId)) {
-                    if (sb.length() > 0) {
-                        sb.append(", ");
-                    }
-                    sb.append(tableId);
-                    if (!validDbIdAndTableId(groupId.dbId, tableId)) {
-                        sb.append("*");
+                    Optional<String> tblName = getTableName(groupId.dbId, tableId);
+                    if (!tblName.isPresent()) {
+                        tblIdJoiner.add(tableId + "*");
+                        tblNameJoiner.add("[deleted]");
+                    } else {
+                        tblIdJoiner.add(tableId.toString());
+                        tblNameJoiner.add(tblName.get());
                     }
                 }
-                info.add(sb.toString());
+                info.add(tblIdJoiner.toString());
+                info.add(tblNameJoiner.toString());
                 ColocateGroupSchema groupSchema = group2Schema.get(groupId);
                 info.add(String.valueOf(groupSchema.getBucketsNum()));
                 info.add(String.valueOf(groupSchema.getReplicationNum()));
                 List<String> cols = groupSchema.getDistributionColTypes().stream().map(
-                        e -> e.toSql()).collect(Collectors.toList());
+                        Type::toSql).collect(Collectors.toList());
                 info.add(Joiner.on(", ").join(cols));
                 info.add(String.valueOf(!isGroupUnstable(groupId)));
                 infos.add(info);
@@ -814,7 +823,9 @@ public class ColocateTableIndex implements Writable {
     private List<GroupId> getOtherGroupsWithSameOrigNameUnlocked(String origName, long dbId) {
         List<GroupId> groupIds = new ArrayList<>();
         for (Map.Entry<String, GroupId> entry : groupName2Id.entrySet()) {
-            if (entry.getKey().split("_")[1].equals(origName) &&
+            // Get existed group original name
+            String existedGroupOrigName = entry.getKey().split("_", 2)[1];
+            if (existedGroupOrigName.equals(origName) &&
                     entry.getValue().dbId != dbId) {
                 groupIds.add(entry.getValue());
             }
@@ -944,33 +955,17 @@ public class ColocateTableIndex implements Writable {
             // set this group as unstable
             markGroupUnstable(groupId, false /* edit log is along with modify table log */);
             table.setColocateGroup(colocateGroup);
-            table.setInColocateMvGroup(false);
         } else {
             // unset colocation group
             if (Strings.isNullOrEmpty(oldGroup)) {
                 // this table is not a colocate table, do nothing
                 return;
             }
-
-            // there is not any colocate mv related to the table
-            // just remove the table from colocate group
-            if (table.getColocateMaterializedViewNames().isEmpty()) {
-                // when replayModifyTableColocate, we need the groupId info
-                String fullGroupName = db.getId() + "_" + oldGroup;
-                groupId = getGroupSchema(fullGroupName).getGroupId();
-                removeTable(table.getId(), table, isReplay);
-                table.setColocateGroup(null);
-                table.setInColocateMvGroup(false);
-            } else {
-                // change the table's group from oldGroup to a new colocate group
-                // which is named by dbName + ":" + mvName
-                Optional<String> anyMvName = table.getColocateMaterializedViewNames().stream().findAny();
-                Preconditions.checkState(anyMvName.isPresent());
-                String groupName = db.getFullName() + ":" + anyMvName.get();
-                groupId = changeGroup(db.getId(), table, oldGroup, groupName, assignedGroupId, isReplay);
-                table.setColocateGroup(groupName);
-                table.setInColocateMvGroup(true);
-            }
+            // when replayModifyTableColocate, we need the groupId info
+            String fullGroupName = db.getId() + "_" + oldGroup;
+            groupId = getGroupSchema(fullGroupName).getGroupId();
+            removeTable(table.getId(), table, isReplay);
+            table.setColocateGroup(null);
         }
 
         if (!isReplay) {

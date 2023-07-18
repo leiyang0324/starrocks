@@ -196,7 +196,7 @@ pipeline::OpFactories ConnectorScanNode::decompose_to_pipeline(pipeline::Pipelin
 
     auto operators = pipeline::decompose_scan_node_to_pipeline(scan_op, this, context);
 
-    if (!_data_source_provider->insert_local_exchange_operator()) {
+    if (_data_source_provider->insert_local_exchange_operator()) {
         operators = context->maybe_interpolate_local_passthrough_exchange(context->fragment_context()->runtime_state(),
                                                                           operators, context->degree_of_parallelism());
     }
@@ -564,9 +564,9 @@ void ConnectorScanNode::_fill_chunk_pool(int count) {
     }
 }
 
-Status ConnectorScanNode::close(RuntimeState* state) {
+void ConnectorScanNode::close(RuntimeState* state) {
     if (is_closed()) {
-        return Status::OK();
+        return;
     }
     _closed = true;
     _update_status(Status::Cancelled("closed"));
@@ -576,8 +576,7 @@ Status ConnectorScanNode::close(RuntimeState* state) {
     }
     _close_pending_scanners();
     _data_source_provider->close(state);
-    RETURN_IF_ERROR(ScanNode::close(state));
-    return Status::OK();
+    ScanNode::close(state);
 }
 
 Status ConnectorScanNode::set_scan_ranges(const std::vector<TScanRangeParams>& scan_ranges) {

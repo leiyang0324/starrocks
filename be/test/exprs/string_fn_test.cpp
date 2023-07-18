@@ -553,7 +553,7 @@ PARALLEL_TEST(VecStringFunctionsTest, split) {
     columns.emplace_back(delim);
     ColumnPtr result = StringFunctions::split(ctx.get(), columns).value();
     auto* col_array = down_cast<ArrayColumn*>(ColumnHelper::get_data_column(result.get()));
-    ASSERT_EQ("['1','2','3'], ['aa','bb','cc'], ['a','b','c'], ['','']", col_array->debug_string());
+    ASSERT_EQ("[['1','2','3'], ['aa','bb','cc'], ['a','b','c'], ['','']]", col_array->debug_string());
 
     columns.clear();
     str->append("");
@@ -577,8 +577,8 @@ PARALLEL_TEST(VecStringFunctionsTest, split) {
     ctx->set_constant_columns(columns);
     ASSERT_TRUE(StringFunctions::split_prepare(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
     result = StringFunctions::split(ctx.get(), columns).value();
-    ASSERT_EQ("['a','bc','d','eeee','f']", result->debug_string());
     ASSERT_TRUE(StringFunctions::split_close(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
+    ASSERT_EQ("[['a','bc','d','eeee','f']]", result->debug_string());
 }
 
 PARALLEL_TEST(VecStringFunctionsTest, splitConst1) {
@@ -595,8 +595,8 @@ PARALLEL_TEST(VecStringFunctionsTest, splitConst1) {
     ctx->set_constant_columns(columns);
     ASSERT_TRUE(StringFunctions::split_prepare(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
     ColumnPtr result = StringFunctions::split(ctx.get(), columns).value();
-    ASSERT_EQ("['a,bc','eeee,f']", result->debug_string());
     ASSERT_TRUE(StringFunctions::split_close(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
+    ASSERT_EQ("[['a,bc','eeee,f']]", result->debug_string());
 }
 
 PARALLEL_TEST(VecStringFunctionsTest, splitConst2) {
@@ -618,7 +618,7 @@ PARALLEL_TEST(VecStringFunctionsTest, splitConst2) {
     ctx->set_constant_columns(columns);
     ASSERT_TRUE(StringFunctions::split_prepare(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
     ColumnPtr result = StringFunctions::split(ctx.get(), columns).value();
-    ASSERT_EQ("['a','b','c'], ['aa','bb','cc'], ['eeeeeeeeee'], ['','']", result->debug_string());
+    ASSERT_EQ("[['a','b','c'], ['aa','bb','cc'], ['eeeeeeeeee'], ['','']]", result->debug_string());
     ASSERT_TRUE(StringFunctions::split_close(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
 }
 
@@ -652,7 +652,10 @@ PARALLEL_TEST(VecStringFunctionsTest, splitChinese) {
         columns.emplace_back(delim);
         ColumnPtr result = StringFunctions::split(ctx.get(), columns).value();
         auto* col_array = down_cast<ArrayColumn*>(ColumnHelper::get_data_column(result.get()));
-        ASSERT_EQ("['1上海','北','京'], ['北','京','.','南','京','.','东','京'], ['北 ','南','*东……',''], ['','市','区','街道']", col_array->debug_string());
+        ASSERT_EQ(
+                "[['1上海','北','京'], ['北','京','.','南','京','.','东','京'], ['北 ','南','*东……',''], "
+                "['','市','区','街道']]",
+                col_array->debug_string());
     }
     /// const
     {
@@ -675,9 +678,9 @@ PARALLEL_TEST(VecStringFunctionsTest, splitChinese) {
         ASSERT_TRUE(
                 StringFunctions::split_prepare(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
         ColumnPtr result = StringFunctions::split(ctx.get(), columns).value();
-        ASSERT_EQ("['a','地',' ','区','b'], [], ['地','s','h','北','j',' ','京',' ','g'], [',']",
-                  result->debug_string());
         ASSERT_TRUE(StringFunctions::split_close(ctx.get(), FunctionContext::FunctionStateScope::FRAGMENT_LOCAL).ok());
+        ASSERT_EQ("[['a','地',' ','区','b'], [], ['地','s','h','北','j',' ','京',' ','g'], [',']]",
+                  result->debug_string());
     }
 }
 
@@ -704,10 +707,10 @@ PARALLEL_TEST(VecStringFunctionsTest, str_to_map) {
     array_str_notnull->append_datum(Datum(DatumArray{Datum("中国:shang海")}));
     array_str_notnull->append_datum(Datum(DatumArray{Datum()}));
     array_str_notnull->append_datum(Datum(DatumArray{Datum("ab:b"), Datum("ab:b"), Datum("")}));
-    array_str_notnull->append_datum(Datum(DatumArray{Datum("a:b"), Datum("a:b中囸"), Datum("道c:d过’"),Datum("道c:d过")}));
+    array_str_notnull->append_datum(
+            Datum(DatumArray{Datum("a:b"), Datum("a:b中囸"), Datum("道c:d过’"), Datum("道c:d过")}));
     array_str_notnull->append_datum(Datum(DatumArray{Datum("a:c:b:d"), Datum(""), Datum("")}));
     array_str_notnull->append_datum(Datum(DatumArray{Datum("ab:b"), Datum("ab:b"), Datum("")}));
-
 
     auto only_null = ColumnHelper::create_const_null_column(chunk_size);
 
@@ -751,23 +754,33 @@ PARALLEL_TEST(VecStringFunctionsTest, str_to_map) {
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_null, map_delimiter_nullable}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, NULL, {'NULL':NULL}, {'ab':'b','':NULL}, {'a':'中囸','道c:d过’':NULL}, {'a':':c:b:d','':NULL}, NULL]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, NULL, {'NULL':NULL}, {'ab':'b','':NULL}, {'a':'中囸','道c:d过’':NULL}, "
+                  "{'a':':c:b:d','':NULL}, NULL]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_null, map_delimiter_notnull}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, NULL, {'NULL':NULL}, {'ab':'b','':NULL}, {'a':'中囸','道c:d过’':NULL}, {'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, NULL, {'NULL':NULL}, {'ab':'b','':NULL}, {'a':'中囸','道c:d过’':NULL}, "
+                  "{'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_null, delim_const_empty}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, NULL, {'N':'ULL'}, {'a':'b:b','':NULL}, {'a':':b中囸','道':'c:d过’'}, {'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, NULL, {'N':'ULL'}, {'a':'b:b','':NULL}, {'a':':b中囸','道':'c:d过’'}, "
+                  "{'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_null, delim_const_ch}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, NULL, {'NULL':NULL}, {'ab:b':NULL,'':NULL}, {'a:b':'囸','道c:d过’':NULL}, {'a:c:b:d':NULL,'':NULL}, {'ab:b':NULL,'':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, NULL, {'NULL':NULL}, {'ab:b':NULL,'':NULL}, {'a:b':'囸','道c:d过’':NULL}, "
+                  "{'a:c:b:d':NULL,'':NULL}, {'ab:b':NULL,'':NULL}]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_null, delim_const}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, NULL, {'NULL':NULL}, {'ab':'b','':NULL}, {'a':'b中囸','道c':'d过’'}, {'a':'c:b:d','':NULL}, {'ab':'b','':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, NULL, {'NULL':NULL}, {'ab':'b','':NULL}, {'a':'b中囸','道c':'d过’'}, "
+                  "{'a':'c:b:d','':NULL}, {'ab':'b','':NULL}]");
     }
     ///
     {
@@ -776,23 +789,33 @@ PARALLEL_TEST(VecStringFunctionsTest, str_to_map) {
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_notnull, map_delimiter_nullable}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, {'中国':'shang海'}, {'':NULL}, {'ab':'b','':NULL}, {'a':'中囸','道c:d过’':NULL,'道c:d过':NULL}, {'a':':c:b:d','':NULL}, NULL]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, {'中国':'shang海'}, {'':NULL}, {'ab':'b','':NULL}, "
+                  "{'a':'中囸','道c:d过’':NULL,'道c:d过':NULL}, {'a':':c:b:d','':NULL}, NULL]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_notnull, map_delimiter_notnull}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, {'中':':shang海'}, {'':NULL}, {'ab':'b','':NULL}, {'a':'中囸','道c:d过’':NULL,'道c:d过':NULL}, {'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, {'中':':shang海'}, {'':NULL}, {'ab':'b','':NULL}, "
+                  "{'a':'中囸','道c:d过’':NULL,'道c:d过':NULL}, {'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_notnull, delim_const_empty}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, {'中':'国:shang海'}, {'':NULL}, {'a':'b:b','':NULL}, {'a':':b中囸','道':'c:d过'}, {'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, {'中':'国:shang海'}, {'':NULL}, {'a':'b:b','':NULL}, {'a':':b中囸','道':'c:d过'}, "
+                  "{'a':':c:b:d','':NULL}, {'a':'b:b','':NULL}]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_notnull, delim_const_ch}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, {'':'国:shang海'}, {'':NULL}, {'ab:b':NULL,'':NULL}, {'a:b':'囸','道c:d过’':NULL,'道c:d过':NULL}, {'a:c:b:d':NULL,'':NULL}, {'ab:b':NULL,'':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, {'':'国:shang海'}, {'':NULL}, {'ab:b':NULL,'':NULL}, "
+                  "{'a:b':'囸','道c:d过’':NULL,'道c:d过':NULL}, {'a:c:b:d':NULL,'':NULL}, {'ab:b':NULL,'':NULL}]");
     }
     {
         auto res = StringFunctions::str_to_map(nullptr, {array_str_notnull, delim_const}).value();
-        ASSERT_EQ(res->debug_string(), "[{'':NULL}, {'中国':'shang海'}, {'':NULL}, {'ab':'b','':NULL}, {'a':'b中囸','道c':'d过'}, {'a':'c:b:d','':NULL}, {'ab':'b','':NULL}]");
+        ASSERT_EQ(res->debug_string(),
+                  "[{'':NULL}, {'中国':'shang海'}, {'':NULL}, {'ab':'b','':NULL}, {'a':'b中囸','道c':'d过'}, "
+                  "{'a':'c:b:d','':NULL}, {'ab':'b','':NULL}]");
     }
     ///
     {

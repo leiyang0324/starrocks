@@ -24,7 +24,6 @@
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/DeleteObjectsRequest.h>
-#include <aws/s3/model/DeleteObjectsResult.h>
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsV2Request.h>
@@ -61,7 +60,7 @@ static Status to_status(Aws::S3::S3Errors error, const std::string& msg) {
     case Aws::S3::S3Errors::NO_SUCH_UPLOAD:
         return Status::NotFound(fmt::format("no such upload: {}", msg));
     default:
-        return Status::InternalError(fmt::format(msg));
+        return Status::InternalError(msg);
     }
 }
 
@@ -129,7 +128,7 @@ private:
 
 S3ClientFactory::S3ClientFactory() : _rand((int)::time(nullptr)) {}
 
-// Get a AWSCredentialsProvider based on CloudCredential
+// Get an AWSCredentialsProvider based on CloudCredential
 std::shared_ptr<Aws::Auth::AWSCredentialsProvider> S3ClientFactory::_get_aws_credentials_provider(
         const AWSCloudCredential& aws_cloud_credential) {
     std::shared_ptr<Aws::Auth::AWSCredentialsProvider> credential_provider = nullptr;
@@ -141,7 +140,8 @@ std::shared_ptr<Aws::Auth::AWSCredentialsProvider> S3ClientFactory::_get_aws_cre
             credential_provider = std::make_shared<Aws::Auth::InstanceProfileCredentialsProvider>();
         } else if (!aws_cloud_credential.access_key.empty() && !aws_cloud_credential.secret_key.empty()) {
             credential_provider = std::make_shared<Aws::Auth::SimpleAWSCredentialsProvider>(
-                    aws_cloud_credential.access_key, aws_cloud_credential.secret_key);
+                    aws_cloud_credential.access_key, aws_cloud_credential.secret_key,
+                    aws_cloud_credential.session_token);
         } else {
             DCHECK(false) << "Unreachable!";
             credential_provider = std::make_shared<Aws::Auth::AnonymousAWSCredentialsProvider>();
@@ -176,6 +176,13 @@ S3ClientFactory::S3ClientPtr S3ClientFactory::new_client(const TCloudConfigurati
     }
     if (!aws_cloud_credential.endpoint.empty()) {
         config.endpointOverride = aws_cloud_credential.endpoint;
+    }
+    config.maxConnections = config::object_storage_max_connection;
+    if (config::object_storage_connect_timeout_ms > 0) {
+        config.connectTimeoutMs = config::object_storage_connect_timeout_ms;
+    }
+    if (config::object_storage_request_timeout_ms >= 0) {
+        config.requestTimeoutMs = config::object_storage_request_timeout_ms;
     }
 
     ClientCacheKey client_cache_key{config, aws_cloud_configuration};
@@ -302,6 +309,13 @@ static std::shared_ptr<Aws::S3::S3Client> new_s3client(const S3URI& uri, const F
             config.region = config::object_storage_region;
         }
         config.maxConnections = config::object_storage_max_connection;
+    }
+    if (config::object_storage_connect_timeout_ms > 0) {
+        config.connectTimeoutMs = config::object_storage_connect_timeout_ms;
+    }
+    // 0 is meaningful for object_storage_request_timeout_ms
+    if (config::object_storage_request_timeout_ms >= 0) {
+        config.requestTimeoutMs = config::object_storage_request_timeout_ms;
     }
     return S3ClientFactory::instance().new_client(config, opts);
 }

@@ -26,14 +26,13 @@ import com.starrocks.catalog.PartitionInfo;
 import com.starrocks.catalog.Table;
 import com.starrocks.catalog.system.SystemId;
 import com.starrocks.catalog.system.information.InfoSchemaDb;
-import com.starrocks.catalog.system.starrocks.StarRocksDb;
+import com.starrocks.catalog.system.sys.SysDb;
 import com.starrocks.common.Config;
 import com.starrocks.common.DdlException;
 import com.starrocks.common.FeConstants;
 import com.starrocks.common.util.UUIDUtil;
 import com.starrocks.persist.EditLog;
 import com.starrocks.persist.ModifyPartitionInfo;
-import com.starrocks.persist.metablock.SRMetaBlockID;
 import com.starrocks.persist.metablock.SRMetaBlockReader;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.thrift.TStorageMedium;
@@ -145,13 +144,13 @@ public class LocalMetaStoreTest {
         UtFrameUtils.PseudoImage image = new UtFrameUtils.PseudoImage();
         localMetaStore.save(image.getDataOutputStream());
 
-        SRMetaBlockReader reader = new SRMetaBlockReader(image.getDataInputStream(), SRMetaBlockID.LOCAL_META_STORE);
+        SRMetaBlockReader reader = new SRMetaBlockReader(image.getDataInputStream());
         localMetaStore.load(reader);
         reader.close();
 
         Assert.assertNotNull(localMetaStore.getDb(SystemId.INFORMATION_SCHEMA_DB_ID));
         Assert.assertNotNull(localMetaStore.getDb(InfoSchemaDb.DATABASE_NAME));
-        Assert.assertNotNull(localMetaStore.getDb(SystemId.STARROCKS_DB_ID));
-        Assert.assertNotNull(localMetaStore.getDb(StarRocksDb.DATABASE_NAME));
+        Assert.assertNotNull(localMetaStore.getDb(SystemId.SYS_DB_ID));
+        Assert.assertNotNull(localMetaStore.getDb(SysDb.DATABASE_NAME));
     }
 }

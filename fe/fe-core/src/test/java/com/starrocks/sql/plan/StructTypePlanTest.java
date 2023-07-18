@@ -50,25 +50,18 @@ public class StructTypePlanTest extends PlanTestBase {
         connectContext.getSessionVariable().setCboPruneSubfield(true);
     }
 
-    // @Test
+    @Test
     public void testStruct() throws Exception {
         String sql = "select * from test1 union all select * from test1";
         String plan = getFragmentPlan(sql);
         assertContains(plan, "0:UNION\n" +
                 "  |  \n" +
-                "  |----6:EXCHANGE\n" +
+                "  |----4:EXCHANGE\n" +
                 "  |    \n" +
-                "  3:EXCHANGE");
+                "  2:EXCHANGE");
         sql = "select c2 from test1 union all select c2_0 from test1";
         plan = getFragmentPlan(sql);
-        assertContains(plan, "2:Project\n" +
-                "  |  <slot 6> : CAST(3: c2 AS struct<col1 int(11), col2 varchar(10)>)\n" +
-                "  |  \n" +
-                "  1:OlapScanNode", "0:UNION\n" +
-                "  |  \n" +
-                "  |----6:EXCHANGE\n" +
-                "  |    \n" +
-                "  3:EXCHANGE");
+        assertContains(plan, "CAST(3: c2 AS struct<a int(11), b varchar(10)>)");
     }
 
     @Test
@@ -95,7 +88,7 @@ public class StructTypePlanTest extends PlanTestBase {
     @Test
     public void testSelectArrayStruct() throws Exception {
         String sql = "select c1.b[10].a from test";
-        assertVerbosePlanContains(sql, "[/c1/b]");
+        assertVerbosePlanContains(sql, "ColumnAccessPath: [/c1/b/INDEX/a]");
     }
 
     @Test
@@ -113,7 +106,7 @@ public class StructTypePlanTest extends PlanTestBase {
         assertVerbosePlanContains(sql, "Pruned type: 3 <-> [STRUCT<a int(11), b int(11)>]");
 
         sql = "select count(c1.b[10].a) from test";
-        assertVerbosePlanContains(sql, "[/c1/b]");
+        assertVerbosePlanContains(sql, "[/c1/b/INDEX/a]");
 
         sql = "select count(c3.c.b) from test group by c1.a, c2.b";
         assertVerbosePlanContains(sql, "[/c1/a, /c2/b, /c3/c/b]");
@@ -195,5 +188,14 @@ public class StructTypePlanTest extends PlanTestBase {
         assertVerbosePlanContains(sql, "[/c3/d]");
         sql = "select map_values(col_map), map_keys(col_map) from (select map_from_arrays([],[]) as col_map)A";
         assertPlanContains(sql, "[], []");
+    }
+
+    @Test
+    public void testCast() throws Exception {
+        String sql = "select cast(row(null, null, null) as STRUCT<a int, b MAP<int, int>, c ARRAY<INT>>); ";
+        String plan = getVerboseExplain(sql);
+        assertContains(plan, "cast(row[(NULL, NULL, NULL); args: BOOLEAN,BOOLEAN,BOOLEAN; " +
+                "result: struct<col1 boolean, col2 boolean, col3 boolean>; args nullable: true; result nullable: true] " +
+                "as struct<a int(11), b map<int(11),int(11)>, c array<int(11)>>)");
     }
 }

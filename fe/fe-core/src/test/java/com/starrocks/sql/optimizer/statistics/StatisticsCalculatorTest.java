@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 package com.starrocks.sql.optimizer.statistics;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.starrocks.analysis.BinaryType;
 import com.starrocks.analysis.JoinOperator;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.OlapTable;
@@ -252,7 +252,8 @@ public class StatisticsCalculatorTest {
                     null,
                     false,
                     Lists.newArrayList(),
-                    Lists.newArrayList());
+                    Lists.newArrayList(),
+                    false);
 
             GroupExpression groupExpression = new GroupExpression(olapScanOperator, Lists.newArrayList());
             groupExpression.setGroup(new Group(0));
@@ -315,7 +316,8 @@ public class StatisticsCalculatorTest {
                         null,
                         false,
                         Lists.newArrayList(),
-                        Lists.newArrayList());
+                        Lists.newArrayList(),
+                        false);
 
         GroupExpression groupExpression = new GroupExpression(olapScanOperator, Lists.newArrayList());
         groupExpression.setGroup(new Group(0));
@@ -364,14 +366,15 @@ public class StatisticsCalculatorTest {
                         ImmutableMap.of(idDate, new Column("id_date", Type.DATE, true)),
                         ImmutableMap.of(new Column("id_date", Type.DATE, true), idDate),
                         null, -1,
-                        new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.EQ,
+                        new BinaryPredicateOperator(BinaryType.EQ,
                                 idDate, ConstantOperator.createDate(LocalDateTime.of(2013, 12, 30, 0, 0, 0))),
                         ((OlapTable) table).getBaseIndexId(),
                         partitionIds,
                         null,
                         false,
                         Lists.newArrayList(),
-                        Lists.newArrayList());
+                        Lists.newArrayList(),
+                        false);
 
         GroupExpression groupExpression = new GroupExpression(olapScanOperator, Lists.newArrayList());
         groupExpression.setGroup(new Group(0));
@@ -399,8 +402,9 @@ public class StatisticsCalculatorTest {
                         null,
                         false,
                         Lists.newArrayList(),
-                        Lists.newArrayList());
-        olapScanOperator.setPredicate(new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.GE,
+                        Lists.newArrayList(),
+                        false);
+        olapScanOperator.setPredicate(new BinaryPredicateOperator(BinaryType.GE,
                 idDate, ConstantOperator.createDate(LocalDateTime.of(2014, 5, 1, 0, 0, 0))));
 
         groupExpression = new GroupExpression(olapScanOperator, Lists.newArrayList());
@@ -458,7 +462,8 @@ public class StatisticsCalculatorTest {
                         null,
                         false,
                         Lists.newArrayList(),
-                        Lists.newArrayList());
+                        Lists.newArrayList(),
+                        false);
 
         GroupExpression groupExpression = new GroupExpression(olapScanOperator, Lists.newArrayList());
         groupExpression.setGroup(new Group(0));
@@ -488,8 +493,9 @@ public class StatisticsCalculatorTest {
                         null,
                         false,
                         Lists.newArrayList(),
-                        Lists.newArrayList());
-        olapScanOperator.setPredicate(new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.GE,
+                        Lists.newArrayList(),
+                        false);
+        olapScanOperator.setPredicate(new BinaryPredicateOperator(BinaryType.GE,
                 idDate, ConstantOperator.createDate(LocalDateTime.of(2020, 04, 24, 0, 0, 0))));
 
         groupExpression = new GroupExpression(olapScanOperator, Lists.newArrayList());
@@ -545,11 +551,11 @@ public class StatisticsCalculatorTest {
         columnRefFactory.updateColumnToRelationIds(v6.getId(), 4);
         // on predicate : t0.v1 = t1.v3 and t0.v2 = t1.v4
         BinaryPredicateOperator eqOnPredicate1 =
-                new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.EQ, v1, v3);
+                new BinaryPredicateOperator(BinaryType.EQ, v1, v3);
         BinaryPredicateOperator eqOnPredicate2 =
-                new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.EQ, v2, v4);
+                new BinaryPredicateOperator(BinaryType.EQ, v2, v4);
         BinaryPredicateOperator eqOnPredicate3 =
-                new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.EQ, v5, v6);
+                new BinaryPredicateOperator(BinaryType.EQ, v5, v6);
         // construct group expression
         LogicalJoinOperator joinOperator =
                 new LogicalJoinOperator(JoinOperator.INNER_JOIN, new CompoundPredicateOperator(
@@ -594,10 +600,10 @@ public class StatisticsCalculatorTest {
 
         // on predicate : t0.v1 = t1.v3 + t1.v4 and t0.v2 = t1.v3 + t1.v4
         BinaryPredicateOperator eqOnPredicateWithAdd1 =
-                new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.EQ, v1,
+                new BinaryPredicateOperator(BinaryType.EQ, v1,
                         new CallOperator("add", Type.BIGINT, Lists.newArrayList(v3, v4)));
         BinaryPredicateOperator eqOnPredicateWithAdd2 =
-                new BinaryPredicateOperator(BinaryPredicateOperator.BinaryType.EQ, v2,
+                new BinaryPredicateOperator(BinaryType.EQ, v2,
                         new CallOperator("add", Type.BIGINT, Lists.newArrayList(v3, v4)));
         joinOperator = new LogicalJoinOperator(JoinOperator.INNER_JOIN, new CompoundPredicateOperator(
                 CompoundPredicateOperator.CompoundType.AND, eqOnPredicateWithAdd1, eqOnPredicateWithAdd2));

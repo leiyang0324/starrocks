@@ -210,9 +210,9 @@ Status OlapScanNode::get_next(RuntimeState* state, ChunkPtr* chunk, bool* eos) {
     return status.is_end_of_file() ? Status::OK() : status;
 }
 
-Status OlapScanNode::close(RuntimeState* state) {
+void OlapScanNode::close(RuntimeState* state) {
     if (is_closed()) {
-        return Status::OK();
+        return;
     }
     exec_debug_action(TExecNodePhase::CLOSE);
     _update_status(Status::Cancelled("closed"));
@@ -243,7 +243,7 @@ Status OlapScanNode::close(RuntimeState* state) {
         Rowset::release_readers(rowsets_per_tablet);
     }
 
-    return ScanNode::close(state);
+    ScanNode::close(state);
 }
 
 OlapScanNode::~OlapScanNode() {
@@ -424,6 +424,9 @@ StatusOr<bool> OlapScanNode::_could_tablet_internal_parallel(
         const std::vector<TScanRangeParams>& scan_ranges, int32_t pipeline_dop, size_t num_total_scan_ranges,
         TTabletInternalParallelMode::type tablet_internal_parallel_mode, int64_t* scan_dop,
         int64_t* splitted_scan_rows) const {
+    if (_olap_scan_node.use_pk_index) {
+        return false;
+    }
     bool force_split = tablet_internal_parallel_mode == TTabletInternalParallelMode::type::FORCE_SPLIT;
     // The enough number of tablets shouldn't use tablet internal parallel.
     if (!force_split && num_total_scan_ranges >= pipeline_dop) {

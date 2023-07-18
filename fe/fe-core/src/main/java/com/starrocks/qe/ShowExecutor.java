@@ -54,11 +54,9 @@ import com.starrocks.backup.RestoreJob;
 import com.starrocks.catalog.Catalog;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Database;
-import com.starrocks.catalog.DeltaLakeTable;
 import com.starrocks.catalog.DynamicPartitionProperty;
 import com.starrocks.catalog.Function;
 import com.starrocks.catalog.HiveMetaStoreTable;
-import com.starrocks.catalog.IcebergTable;
 import com.starrocks.catalog.Index;
 import com.starrocks.catalog.InternalCatalog;
 import com.starrocks.catalog.LocalTablet;
@@ -69,6 +67,7 @@ import com.starrocks.catalog.MaterializedView;
 import com.starrocks.catalog.MetadataViewer;
 import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Partition;
+import com.starrocks.catalog.PartitionType;
 import com.starrocks.catalog.Replica;
 import com.starrocks.catalog.ScalarType;
 import com.starrocks.catalog.Table;
@@ -88,7 +87,7 @@ import com.starrocks.common.PatternMatcher;
 import com.starrocks.common.proc.BackendsProcDir;
 import com.starrocks.common.proc.ComputeNodeProcDir;
 import com.starrocks.common.proc.FrontendsProcNode;
-import com.starrocks.common.proc.LakeTabletsProcNode;
+import com.starrocks.common.proc.LakeTabletsProcDir;
 import com.starrocks.common.proc.LocalTabletsProcDir;
 import com.starrocks.common.proc.PartitionsProcDir;
 import com.starrocks.common.proc.ProcNodeInterface;
@@ -103,6 +102,8 @@ import com.starrocks.credential.CloudCredentialUtil;
 import com.starrocks.load.DeleteMgr;
 import com.starrocks.load.ExportJob;
 import com.starrocks.load.ExportMgr;
+import com.starrocks.load.pipe.Pipe;
+import com.starrocks.load.pipe.PipeManager;
 import com.starrocks.load.routineload.RoutineLoadFunctionalExprProvider;
 import com.starrocks.load.routineload.RoutineLoadJob;
 import com.starrocks.load.streamload.StreamLoadFunctionalExprProvider;
@@ -116,7 +117,7 @@ import com.starrocks.privilege.DbPEntryObject;
 import com.starrocks.privilege.ObjectType;
 import com.starrocks.privilege.PrivilegeActions;
 import com.starrocks.privilege.PrivilegeBuiltinConstants;
-import com.starrocks.privilege.PrivilegeCollection;
+import com.starrocks.privilege.PrivilegeEntry;
 import com.starrocks.privilege.PrivilegeException;
 import com.starrocks.privilege.PrivilegeType;
 import com.starrocks.privilege.TablePEntryObject;
@@ -199,6 +200,8 @@ import com.starrocks.sql.ast.ShowUserStmt;
 import com.starrocks.sql.ast.ShowVariablesStmt;
 import com.starrocks.sql.ast.ShowWarehousesStmt;
 import com.starrocks.sql.ast.UserIdentity;
+import com.starrocks.sql.ast.pipe.DescPipeStmt;
+import com.starrocks.sql.ast.pipe.ShowPipeStmt;
 import com.starrocks.sql.common.MetaUtils;
 import com.starrocks.statistic.AnalyzeJob;
 import com.starrocks.statistic.AnalyzeStatus;
@@ -372,6 +375,10 @@ public class ShowExecutor {
             handleShowStorageVolumes();
         } else if (stmt instanceof DescStorageVolumeStmt) {
             handleDescStorageVolume();
+        } else if (stmt instanceof ShowPipeStmt) {
+            handleShowPipes();
+        } else if (stmt instanceof DescPipeStmt) {
+            handleDescPipe();
         } else {
             handleEmpty();
         }
@@ -395,7 +402,8 @@ public class ShowExecutor {
                         .getUserAuthenticationInfoByUserIdentity(connectContext.getCurrentUserIdentity());
             } else {
                 userAuthenticationInfo =
-                        authenticationManager.getUserAuthenticationInfoByUserIdentity(showAuthenticationStmt.getUserIdent());
+                        authenticationManager.getUserAuthenticationInfoByUserIdentity(
+                                showAuthenticationStmt.getUserIdent());
             }
             authenticationInfoMap.put(showAuthenticationStmt.getUserIdent(), userAuthenticationInfo);
         }
@@ -424,7 +432,7 @@ public class ShowExecutor {
         MetaUtils.checkDbNullAndReport(db, dbName);
 
         List<MaterializedView> materializedViews = Lists.newArrayList();
-        List<Pair<OlapTable, MaterializedIndex>> singleTableMVs = Lists.newArrayList();
+        List<Pair<OlapTable, MaterializedIndexMeta>> singleTableMVs = Lists.newArrayList();
         db.readLock();
         try {
             PatternMatcher matcher = null;
@@ -439,7 +447,6 @@ public class ShowExecutor {
                     if (matcher != null && !matcher.match(mvTable.getName())) {
                         continue;
                     }
-
 
                     AtomicBoolean baseTableHasPrivilege = new AtomicBoolean(true);
                     mvTable.getBaseTableInfos().forEach(baseTableInfo -> {
@@ -463,16 +470,16 @@ public class ShowExecutor {
                     materializedViews.add(mvTable);
                 } else if (Table.TableType.OLAP == table.getType()) {
                     OlapTable olapTable = (OlapTable) table;
-                    List<MaterializedIndex> visibleMaterializedViews = olapTable.getVisibleIndex();
+                    List<MaterializedIndexMeta> visibleMaterializedViews = olapTable.getVisibleIndexMetas();
                     long baseIdx = olapTable.getBaseIndexId();
-                    for (MaterializedIndex mvIdx : visibleMaterializedViews) {
-                        if (baseIdx == mvIdx.getId()) {
+                    for (MaterializedIndexMeta mvMeta : visibleMaterializedViews) {
+                        if (baseIdx == mvMeta.getIndexId()) {
                             continue;
                         }
-                        if (matcher != null && !matcher.match(olapTable.getIndexNameById(mvIdx.getId()))) {
+                        if (matcher != null && !matcher.match(olapTable.getIndexNameById(mvMeta.getIndexId()))) {
                             continue;
                         }
-                        singleTableMVs.add(Pair.create(olapTable, mvIdx));
+                        singleTableMVs.add(Pair.create(olapTable, mvMeta));
                     }
                 }
             }
@@ -514,7 +521,7 @@ public class ShowExecutor {
     public static List<List<String>> listMaterializedViewStatus(
             String dbName,
             List<MaterializedView> materializedViews,
-            List<Pair<OlapTable, MaterializedIndex>> singleTableMVs) {
+            List<Pair<OlapTable, MaterializedIndexMeta>> singleTableMVs) {
         List<List<String>> rowSets = Lists.newArrayList();
 
         // Now there are two MV cases:
@@ -545,7 +552,7 @@ public class ShowExecutor {
             }
             // is_active
             resultRow.add(String.valueOf(mvTable.isActive()));
-            resultRow.add(String.valueOf(mvTable.getInactiveReason()));
+            resultRow.add(Optional.ofNullable(mvTable.getInactiveReason()).map(String::valueOf).orElse(null));
             // partition info
             if (mvTable.getPartitionInfo() != null && mvTable.getPartitionInfo().getType() != null) {
                 resultRow.add(mvTable.getPartitionInfo().getType().toString());
@@ -559,15 +566,15 @@ public class ShowExecutor {
             rowSets.add(resultRow);
         }
 
-        for (Pair<OlapTable, MaterializedIndex> singleTableMV : singleTableMVs) {
+        for (Pair<OlapTable, MaterializedIndexMeta> singleTableMV : singleTableMVs) {
             OlapTable olapTable = singleTableMV.first;
-            MaterializedIndex mvIdx = singleTableMV.second;
+            MaterializedIndexMeta mvMeta = singleTableMV.second;
 
+            long mvId = mvMeta.getIndexId();
             ArrayList<String> resultRow = new ArrayList<>();
-            MaterializedIndexMeta mvMeta = olapTable.getVisibleIndexIdToMeta().get(mvIdx.getId());
-            resultRow.add(String.valueOf(mvIdx.getId()));
+            resultRow.add(String.valueOf(mvId));
             resultRow.add(dbName);
-            resultRow.add(olapTable.getIndexNameById(mvIdx.getId()));
+            resultRow.add(olapTable.getIndexNameById(mvId));
             // refresh_type
             resultRow.add("ROLLUP");
             // is_active
@@ -583,9 +590,15 @@ public class ShowExecutor {
             // task run status
             setTaskRunStatus(resultRow, null);
             // rows
-            resultRow.add(String.valueOf(mvIdx.getRowCount()));
+            if (olapTable.getPartitionInfo().getType() == PartitionType.UNPARTITIONED) {
+                Partition partition = olapTable.getPartitions().iterator().next();
+                MaterializedIndex index = partition.getIndex(mvId);
+                resultRow.add(String.valueOf(index.getRowCount()));
+            } else {
+                resultRow.add(String.valueOf(0L));
+            }
             if (mvMeta.getOriginStmt() == null) {
-                String mvName = olapTable.getIndexNameById(mvIdx.getId());
+                String mvName = olapTable.getIndexNameById(mvId);
                 resultRow.add(buildCreateMVSql(olapTable, mvName, mvMeta));
             } else {
                 resultRow.add(mvMeta.getOriginStmt().replace("\n", "").replace("\t", "")
@@ -856,12 +869,7 @@ public class ShowExecutor {
                     LOG.warn("table {}.{}.{} does not exist", catalogName, dbName, tableName);
                     continue;
                 }
-                if (table.isView()) {
-                    if (!PrivilegeActions.checkAnyActionOnView(
-                            connectContext, catalogName, db.getFullName(), table.getName())) {
-                        continue;
-                    }
-                } else if (!PrivilegeActions.checkAnyActionOnTable(connectContext,
+                if (!PrivilegeActions.checkAnyActionOnTable(connectContext,
                         catalogName, dbName, tableName)) {
                     continue;
                 }
@@ -897,7 +905,6 @@ public class ShowExecutor {
                     if (matcher != null && !matcher.match(table.getName())) {
                         continue;
                     }
-
 
                     if (!PrivilegeActions.checkAnyActionOnTable(connectContext, db.getFullName(), table.getName())) {
                         continue;
@@ -946,7 +953,7 @@ public class ShowExecutor {
                     // Create_options
                     row.add("");
                     // Comment
-                    row.add(table.getComment());
+                    row.add(table.getDisplayComment());
 
                     rows.add(row);
                 }
@@ -988,6 +995,11 @@ public class ShowExecutor {
         createSqlBuilder.append("CREATE DATABASE `").append(showStmt.getDb()).append("`");
         if (!Strings.isNullOrEmpty(db.getLocation())) {
             createSqlBuilder.append("\nPROPERTIES (\"location\" = \"").append(db.getLocation()).append("\")");
+        }
+        String storageVolumeId = GlobalStateMgr.getCurrentState().getStorageVolumeMgr().getStorageVolumeIdOfDb(db.getId());
+        if (!Strings.isNullOrEmpty(storageVolumeId)) {
+            String volume = GlobalStateMgr.getCurrentState().getStorageVolumeMgr().getStorageVolumeName(storageVolumeId);
+            createSqlBuilder.append("\nPROPERTIES (\"storage_volume\" = \"").append(volume).append("\")");
         }
         rows.add(Lists.newArrayList(showStmt.getDb(), createSqlBuilder.toString()));
         resultSet = new ShowResultSet(showStmt.getMetaData(), rows);
@@ -1045,9 +1057,11 @@ public class ShowExecutor {
         if (table.isHiveTable() || table.isHudiTable()) {
             location = ((HiveMetaStoreTable) table).getTableLocation();
         } else if (table.isIcebergTable()) {
-            location = ((IcebergTable) table).getTableLocation();
+            location = table.getTableLocation();
         } else if (table.isDeltalakeTable()) {
-            location = ((DeltaLakeTable) table).getTableLocation();
+            location = table.getTableLocation();
+        } else if (table.isPaimonTable()) {
+            location = table.getTableLocation();
         }
 
         if (!Strings.isNullOrEmpty(location)) {
@@ -1066,7 +1080,7 @@ public class ShowExecutor {
         sb.append(" DEFAULT NULL");
 
         if (!Strings.isNullOrEmpty(column.getComment())) {
-            sb.append(" COMMENT \"").append(column.getComment()).append("\"");
+            sb.append(" COMMENT \"").append(column.getDisplayComment()).append("\"");
         }
 
         return sb.toString();
@@ -1088,19 +1102,20 @@ public class ShowExecutor {
                     for (Table tbl : db.getTables()) {
                         if (tbl.getType() == Table.TableType.OLAP) {
                             OlapTable olapTable = (OlapTable) tbl;
-                            List<MaterializedIndex> visibleMaterializedViews = olapTable.getVisibleIndex();
-                            for (MaterializedIndex mvIdx : visibleMaterializedViews) {
-                                if (olapTable.getIndexNameById(mvIdx.getId()).equals(showStmt.getTable())) {
-                                    MaterializedIndexMeta mvMeta = olapTable.getVisibleIndexIdToMeta().get(mvIdx.getId());
+                            List<MaterializedIndexMeta> visibleMaterializedViews =
+                                    olapTable.getVisibleIndexMetas();
+                            for (MaterializedIndexMeta mvMeta : visibleMaterializedViews) {
+                                if (olapTable.getIndexNameById(mvMeta.getIndexId()).equals(showStmt.getTable())) {
                                     if (mvMeta.getOriginStmt() == null) {
-                                        String mvName = olapTable.getIndexNameById(mvIdx.getId());
+                                        String mvName = olapTable.getIndexNameById(mvMeta.getIndexId());
                                         rows.add(Lists.newArrayList(showStmt.getTable(), buildCreateMVSql(olapTable,
                                                 mvName, mvMeta), "utf8", "utf8_general_ci"));
                                     } else {
                                         rows.add(Lists.newArrayList(showStmt.getTable(), mvMeta.getOriginStmt(),
                                                 "utf8", "utf8_general_ci"));
                                     }
-                                    resultSet = new ShowResultSet(ShowCreateTableStmt.getMaterializedViewMetaData(), rows);
+                                    resultSet =
+                                            new ShowResultSet(ShowCreateTableStmt.getMaterializedViewMetaData(), rows);
                                     return;
                                 }
                             }
@@ -1201,7 +1216,7 @@ public class ShowExecutor {
                             defaultValue,
                             aggType,
                             "",
-                            col.getComment()));
+                            col.getDisplayComment()));
                 } else {
                     // Field Type Null Key Default Extra
                     rows.add(Lists.newArrayList(columnName,
@@ -1398,7 +1413,8 @@ public class ShowExecutor {
         }
 
         if (routineLoadJobList != null) {
-            RoutineLoadFunctionalExprProvider fProvider = showRoutineLoadStmt.getFunctionalExprProvider(this.connectContext);
+            RoutineLoadFunctionalExprProvider fProvider =
+                    showRoutineLoadStmt.getFunctionalExprProvider(this.connectContext);
             rows = routineLoadJobList.parallelStream()
                     .filter(fProvider.getPredicateChain())
                     .sorted(fProvider.getOrderComparator())
@@ -1413,7 +1429,8 @@ public class ShowExecutor {
             throw new AnalysisException("There is no running job named " + showRoutineLoadStmt.getName()
                     + " in db " + showRoutineLoadStmt.getDbFullName()
                     + ". Include history? " + showRoutineLoadStmt.isIncludeHistory()
-                    + ", you can try `show all routine load job for job_name` if you want to list stopped and cancelled jobs");
+                    +
+                    ", you can try `show all routine load job for job_name` if you want to list stopped and cancelled jobs");
         }
         resultSet = new ShowResultSet(showRoutineLoadStmt.getMetaData(), rows);
     }
@@ -1474,7 +1491,8 @@ public class ShowExecutor {
         }
 
         if (streamLoadTaskList != null) {
-            StreamLoadFunctionalExprProvider fProvider = showStreamLoadStmt.getFunctionalExprProvider(this.connectContext);
+            StreamLoadFunctionalExprProvider fProvider =
+                    showStreamLoadStmt.getFunctionalExprProvider(this.connectContext);
             rows = streamLoadTaskList.parallelStream()
                     .filter(fProvider.getPredicateChain())
                     .sorted(fProvider.getOrderComparator())
@@ -1652,7 +1670,6 @@ public class ShowExecutor {
                             connectContext.getRemoteIP(),
                             tableName);
                 }
-
 
                 Table table = db.getTable(tableName);
                 if (table == null) {
@@ -1872,7 +1889,7 @@ public class ShowExecutor {
                             continue;
                         }
                         if (olapTable.isCloudNativeTableOrMaterializedView()) {
-                            LakeTabletsProcNode procNode = new LakeTabletsProcNode(db, olapTable, index);
+                            LakeTabletsProcDir procNode = new LakeTabletsProcDir(db, olapTable, index);
                             tabletInfos.addAll(procNode.fetchComparableResult());
                         } else {
                             LocalTabletsProcDir procDir = new LocalTabletsProcDir(db, olapTable, index);
@@ -2012,7 +2029,6 @@ public class ShowExecutor {
 
             BackupJob backupJob = (BackupJob) jobI;
 
-
             // check privilege
             List<TableRef> tableRefs = backupJob.getTableRef();
             AtomicBoolean privilegeDeny = new AtomicBoolean(false);
@@ -2076,7 +2092,7 @@ public class ShowExecutor {
         return catalogOptional.get().getName();
     }
 
-    private String getCatalogNameFromPEntry(ObjectType objectType, PrivilegeCollection.PrivilegeEntry privilegeEntry)
+    private String getCatalogNameFromPEntry(ObjectType objectType, PrivilegeEntry privilegeEntry)
             throws MetaNotFoundException {
         if (objectType.equals(ObjectType.CATALOG)) {
             CatalogPEntryObject catalogPEntryObject =
@@ -2104,12 +2120,12 @@ public class ShowExecutor {
     }
 
     private List<List<String>> privilegeToRowString(AuthorizationMgr authorizationManager, GrantRevokeClause userOrRoleName,
-                                                    Map<ObjectType, List<PrivilegeCollection.PrivilegeEntry>>
-                                                            typeToPrivilegeEntryList) throws PrivilegeException {
+                                                    Map<ObjectType, List<PrivilegeEntry>> typeToPrivilegeEntryList)
+            throws PrivilegeException {
         List<List<String>> infos = new ArrayList<>();
-        for (Map.Entry<ObjectType, List<PrivilegeCollection.PrivilegeEntry>> typeToPrivilegeEntry
+        for (Map.Entry<ObjectType, List<PrivilegeEntry>> typeToPrivilegeEntry
                 : typeToPrivilegeEntryList.entrySet()) {
-            for (PrivilegeCollection.PrivilegeEntry privilegeEntry : typeToPrivilegeEntry.getValue()) {
+            for (PrivilegeEntry privilegeEntry : typeToPrivilegeEntry.getValue()) {
                 ObjectType objectType = typeToPrivilegeEntry.getKey();
                 String catalogName;
                 try {
@@ -2156,7 +2172,7 @@ public class ShowExecutor {
                     infos.add(granteeRole);
                 }
 
-                Map<ObjectType, List<PrivilegeCollection.PrivilegeEntry>> typeToPrivilegeEntryList =
+                Map<ObjectType, List<PrivilegeEntry>> typeToPrivilegeEntryList =
                         authorizationManager.getTypeToPrivilegeEntryListByRole(showStmt.getRole());
                 infos.addAll(privilegeToRowString(authorizationManager,
                         new GrantRevokeClause(null, showStmt.getRole()), typeToPrivilegeEntryList));
@@ -2166,7 +2182,7 @@ public class ShowExecutor {
                     infos.add(granteeRole);
                 }
 
-                Map<ObjectType, List<PrivilegeCollection.PrivilegeEntry>> typeToPrivilegeEntryList =
+                Map<ObjectType, List<PrivilegeEntry>> typeToPrivilegeEntryList =
                         authorizationManager.getTypeToPrivilegeEntryListByUser(showStmt.getUserIdent());
                 infos.addAll(privilegeToRowString(authorizationManager,
                         new GrantRevokeClause(showStmt.getUserIdent(), null), typeToPrivilegeEntryList));
@@ -2528,7 +2544,7 @@ public class ShowExecutor {
         // Comment
         String comment = catalog.getComment();
         if (comment != null) {
-            createCatalogSql.append("comment \"").append(catalog.getComment()).append("\"\n");
+            createCatalogSql.append("comment \"").append(catalog.getDisplayComment()).append("\"\n");
         }
         Map<String, String> clonedConfig = new HashMap<>(catalog.getConfig());
         CloudCredentialUtil.maskCloudCredential(clonedConfig);
@@ -2553,8 +2569,9 @@ public class ShowExecutor {
         }
         PatternMatcher finalMatcher = matcher;
         storageVolumeNames = storageVolumeNames.stream()
-                .filter(tblName -> finalMatcher == null || finalMatcher.match(tblName))
-                // TODO: check privilege
+                .filter(storageVolumeName -> finalMatcher == null || finalMatcher.match(storageVolumeName))
+                .filter(storageVolumeName -> PrivilegeActions.checkAnyActionOnStorageVolume(connectContext,
+                        storageVolumeName))
                 .collect(Collectors.toList());
         for (String storageVolumeName : storageVolumeNames) {
             rows.add(Lists.newArrayList(storageVolumeName));
@@ -2565,5 +2582,37 @@ public class ShowExecutor {
     private void handleDescStorageVolume() throws AnalysisException {
         DescStorageVolumeStmt desc = (DescStorageVolumeStmt) stmt;
         resultSet = new ShowResultSet(desc.getMetaData(), desc.getResultRows());
+    }
+
+    private void handleShowPipes() {
+        List<List<String>> rows = Lists.newArrayList();
+        String dbName = ((ShowPipeStmt) stmt).getDbName();
+        long dbId = GlobalStateMgr.getCurrentState().mayGetDb(dbName)
+                .map(Database::getId)
+                .orElseThrow(() -> ErrorReport.buildSemanticException(ErrorCode.ERR_BAD_DB_ERROR, dbName));
+        PipeManager pipeManager = GlobalStateMgr.getCurrentState().getPipeManager();
+        pipeManager.getPipesUnlock().values().forEach(pipe -> {
+            // show pipes in current database
+            if (pipe.getPipeId().getDbId() != dbId) {
+                return;
+            }
+            List<String> row = Lists.newArrayList();
+            ShowPipeStmt.handleShow(row, pipe);
+            rows.add(row);
+        });
+        resultSet = new ShowResultSet(stmt.getMetaData(), rows);
+    }
+
+    private void handleDescPipe() {
+        List<List<String>> rows = Lists.newArrayList();
+        DescPipeStmt descStmt = ((DescPipeStmt) stmt);
+        PipeManager pipeManager = GlobalStateMgr.getCurrentState().getPipeManager();
+        Pipe pipe = pipeManager.mayGetPipe(descStmt.getName())
+                .orElseThrow(() -> ErrorReport.buildSemanticException(ErrorCode.ERR_UNKNOWN_PIPE, descStmt.getName()));
+
+        List<String> row = Lists.newArrayList();
+        DescPipeStmt.handleDesc(row, pipe);
+        rows.add(row);
+        resultSet = new ShowResultSet(stmt.getMetaData(), rows);
     }
 }

@@ -35,6 +35,7 @@ import com.starrocks.sql.optimizer.operator.scalar.CallOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperatorUtil;
+import org.apache.commons.collections4.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,6 +72,9 @@ public class LogicalAggregationOperator extends LogicalOperator {
 
     private DataSkewInfo distinctColumnDataSkew = null;
 
+    // If the AggType is not GLOBAL, it means we have split the agg hence the isSplit should be true.
+    // `this.isSplit = !type.isGlobal() || isSplit;` helps us do the work.
+    // If you want to manually set this value, you could invoke setOnlyLocalAggregate().
     public LogicalAggregationOperator(AggType type,
                                       List<ColumnRefOperator> groupingKeys,
                                       Map<ColumnRefOperator, CallOperator> aggregations) {
@@ -160,6 +164,12 @@ public class LogicalAggregationOperator extends LogicalOperator {
     public boolean hasSkew() {
         return this.getAggregations().values().stream().anyMatch(call ->
                 call.isDistinct() && call.getFnName().equals(FunctionSet.COUNT) && call.getHints().contains("skew"));
+    }
+
+    // only split local agg with group by keys and a child not distinct local agg can use streaming preAgg
+    public boolean canUseStreamingPreAgg() {
+        return type.isLocal() && isSplit && CollectionUtils.isNotEmpty(groupingKeys)
+                && singleDistinctFunctionPos == -1;
     }
 
     public boolean checkGroupByCountDistinctWithSkewHint() {
@@ -262,7 +272,6 @@ public class LogicalAggregationOperator extends LogicalOperator {
             Preconditions.checkNotNull(builder.aggregations);
             Preconditions.checkNotNull(builder.groupingKeys);
             Preconditions.checkNotNull(builder.partitionByColumns);
-            builder.isSplit = !builder.type.isGlobal() || builder.isSplit;
             return super.build();
         }
 

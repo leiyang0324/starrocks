@@ -206,13 +206,13 @@ Status RowsetColumnUpdateState::_prepare_partial_update_states(Tablet* tablet, R
 
     int64_t t_read_rss = MonotonicMillis();
     if (need_lock) {
-        RETURN_IF_ERROR(tablet->updates()->prepare_partial_update_states(
-                tablet, _upserts[idx], &(_partial_update_states[idx].read_version),
-                &(_partial_update_states[idx].src_rss_rowids)));
+        RETURN_IF_ERROR(tablet->updates()->get_rss_rowids_by_pk(tablet, *_upserts[idx],
+                                                                &(_partial_update_states[idx].read_version),
+                                                                &(_partial_update_states[idx].src_rss_rowids)));
     } else {
-        RETURN_IF_ERROR(tablet->updates()->prepare_partial_update_states_unlock(
-                tablet, _upserts[idx], &(_partial_update_states[idx].read_version),
-                &(_partial_update_states[idx].src_rss_rowids)));
+        RETURN_IF_ERROR(tablet->updates()->get_rss_rowids_by_pk_unlock(tablet, *_upserts[idx],
+                                                                       &(_partial_update_states[idx].read_version),
+                                                                       &(_partial_update_states[idx].src_rss_rowids)));
     }
     // build `rss_rowid_to_update_rowid`
     _partial_update_states[idx].build_rss_rowid_to_update_rowid();
@@ -331,21 +331,23 @@ static StatusOr<ChunkPtr> read_from_source_segment(Rowset* rowset, const Schema&
 
 // this function build delta writer for delta column group's file.(end with `.col`)
 StatusOr<std::unique_ptr<SegmentWriter>> RowsetColumnUpdateState::_prepare_delta_column_group_writer(
-        Rowset* rowset, std::shared_ptr<TabletSchema> tschema, uint32_t rssid, int64_t ver) {
+        Rowset* rowset, const std::shared_ptr<TabletSchema>& tschema, uint32_t rssid, int64_t ver) {
     ASSIGN_OR_RETURN(auto fs, FileSystem::CreateSharedFromString(rowset->rowset_path()));
     ASSIGN_OR_RETURN(auto rowsetid_segid, _find_rowset_seg_id(rssid));
+    // always 0 file suffix here, because alter table will execute after this version has been applied only.
     const std::string path = Rowset::delta_column_group_path(rowset->rowset_path(), rowsetid_segid.unique_rowset_id,
-                                                             rowsetid_segid.segment_id, ver);
+                                                             rowsetid_segid.segment_id, ver, 0);
     (void)fs->delete_file(path); // delete .cols if already exist
     WritableFileOptions opts{.sync_on_close = true};
     ASSIGN_OR_RETURN(auto wfile, fs->new_writable_file(opts, path));
     SegmentWriterOptions writer_options;
-    auto segment_writer = std::make_unique<SegmentWriter>(std::move(wfile), rssid, tschema.get(), writer_options);
+    auto segment_writer =
+            std::make_unique<SegmentWriter>(std::move(wfile), rowsetid_segid.segment_id, tschema.get(), writer_options);
     RETURN_IF_ERROR(segment_writer->init(false));
     return std::move(segment_writer);
 }
 
-static Status read_chunk_from_update_file(ChunkIteratorPtr iter, ChunkPtr result_chunk) {
+static Status read_chunk_from_update_file(const ChunkIteratorPtr& iter, const ChunkPtr& result_chunk) {
     auto chunk = result_chunk->clone_empty(1024);
     while (true) {
         chunk->reset();
@@ -454,8 +456,8 @@ Status RowsetColumnUpdateState::finalize(Tablet* tablet, Rowset* rowset, const P
     std::map<uint32_t, RowidsToUpdateRowids> rss_rowid_to_update_rowid;
     for (int upt_id = 0; upt_id < _partial_update_states.size(); upt_id++) {
         for (const auto& each : _partial_update_states[upt_id].rss_rowid_to_update_rowid) {
-            uint32_t rssid = (uint32_t)(each.first >> 32);
-            uint32_t rowid = (uint32_t)(each.first & ROWID_MASK);
+            auto rssid = (uint32_t)(each.first >> 32);
+            auto rowid = (uint32_t)(each.first & ROWID_MASK);
             rss_rowid_to_update_rowid[rssid][rowid] = std::make_pair(upt_id, each.second);
             // prepare delta column writers by the way
             if (delta_column_group_writer.count(rssid) == 0) {
@@ -517,9 +519,10 @@ Status RowsetColumnUpdateState::finalize(Tablet* tablet, Rowset* rowset, const P
         // 4.5 generate delta columngroup
         _rssid_to_delta_column_group[each.first] = std::make_shared<DeltaColumnGroup>();
         // must record unique column id in delta column group
-        _rssid_to_delta_column_group[each.first]->init(
-                latest_applied_version.major() + 1, unique_update_column_ids,
-                file_name(delta_column_group_writer[each.first]->segment_path()));
+        std::vector<std::vector<uint32_t>> dcg_column_ids{unique_update_column_ids};
+        std::vector<std::string> dcg_column_files{file_name(delta_column_group_writer[each.first]->segment_path())};
+        _rssid_to_delta_column_group[each.first]->init(latest_applied_version.major() + 1, dcg_column_ids,
+                                                       dcg_column_files);
     }
     cost_str << " [generate delta column group] " << watch.elapsed_time();
     watch.reset();
@@ -532,7 +535,8 @@ Status RowsetColumnUpdateState::finalize(Tablet* tablet, Rowset* rowset, const P
                                     rss_rowid_to_update_rowid.size(), _partial_update_states.size(),
                                     update_column_ids.size(), update_rows);
 
-    LOG(INFO) << "RowsetColumnUpdateState tablet_id: " << tablet->tablet_id() << " finalize cost:" << cost_str.str();
+    LOG(INFO) << "RowsetColumnUpdateState tablet_id: " << tablet->tablet_id() << ", txn_id: " << rowset->txn_id()
+              << ", finalize cost:" << cost_str.str();
     _finalize_finished = true;
     return Status::OK();
 }

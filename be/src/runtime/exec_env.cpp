@@ -56,6 +56,7 @@
 #include "runtime/broker_mgr.h"
 #include "runtime/client_cache.h"
 #include "runtime/data_stream_mgr.h"
+#include "runtime/dummy_load_path_mgr.h"
 #include "runtime/external_scan_context_mgr.h"
 #include "runtime/fragment_mgr.h"
 #include "runtime/heartbeat_flags.h"
@@ -152,16 +153,16 @@ static int64_t calc_max_consistency_memory(int64_t process_mem_limit) {
 
 bool ExecEnv::_is_init = false;
 
-Status ExecEnv::init(ExecEnv* env, const std::vector<StorePath>& store_paths) {
+Status ExecEnv::init(ExecEnv* env, const std::vector<StorePath>& store_paths, bool as_cn) {
     DeferOp op([]() { ExecEnv::_is_init = true; });
-    return env->_init(store_paths);
+    return env->_init(store_paths, as_cn);
 }
 
 bool ExecEnv::is_init() {
     return _is_init;
 }
 
-Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
+Status ExecEnv::_init(const std::vector<StorePath>& store_paths, bool as_cn) {
     _store_paths = store_paths;
     _external_scan_context_mgr = new ExternalScanContextMgr(this);
     _metrics = StarRocksMetrics::instance()->metrics();
@@ -211,6 +212,15 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     }
     _query_rpc_pool = new PriorityThreadPool("query_rpc", query_rpc_threads, std::numeric_limits<uint32_t>::max());
 
+    // The _load_rpc_pool now handles routine load RPC and table function RPC.
+    RETURN_IF_ERROR(ThreadPoolBuilder("load_rpc") // thread pool for load rpc
+                            .set_min_threads(10)
+                            .set_max_threads(1000)
+                            .set_max_queue_size(0)
+                            .set_idle_timeout(MonoDelta::FromMilliseconds(2000))
+                            .build(&_load_rpc_pool));
+    REGISTER_GAUGE_STARROCKS_METRIC(load_rpc_threadpool_size, _load_rpc_pool->num_threads);
+
     std::unique_ptr<ThreadPool> driver_executor_thread_pool;
     _max_executor_threads = CpuInfo::num_cores();
     if (config::pipeline_exec_thread_pool_thread_num > 0) {
@@ -233,8 +243,16 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             new pipeline::GlobalDriverExecutor("wg_pip_exe", std::move(wg_driver_executor_thread_pool), true);
     _wg_driver_executor->initialize(_max_executor_threads);
 
-    int connector_num_io_threads = config::pipeline_connector_scan_thread_num_per_cpu * CpuInfo::num_cores();
+    int connector_num_io_threads = int(config::pipeline_connector_scan_thread_num_per_cpu * CpuInfo::num_cores());
     CHECK_GT(connector_num_io_threads, 0) << "pipeline_connector_scan_thread_num_per_cpu should greater than 0";
+
+    if (config::hdfs_client_enable_hedged_read) {
+        // Set hdfs client hedged read pool size
+        config::hdfs_client_hedged_read_threadpool_size =
+                std::min(connector_num_io_threads * 2, config::hdfs_client_hedged_read_threadpool_size);
+        CHECK_GT(config::hdfs_client_hedged_read_threadpool_size, 0)
+                << "hdfs_client_hedged_read_threadpool_size should greater than 0";
+    }
 
     std::unique_ptr<ThreadPool> connector_scan_worker_thread_pool_with_workgroup;
     RETURN_IF_ERROR(ThreadPoolBuilder("con_wg_scan_io")
@@ -243,15 +261,20 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
                             .set_max_queue_size(1000)
                             .set_idle_timeout(MonoDelta::FromMilliseconds(2000))
                             .build(&connector_scan_worker_thread_pool_with_workgroup));
-    _connector_scan_executor_with_workgroup =
+    _connector_scan_executor =
             new workgroup::ScanExecutor(std::move(connector_scan_worker_thread_pool_with_workgroup),
                                         std::make_unique<workgroup::WorkGroupScanTaskQueue>(
                                                 workgroup::WorkGroupScanTaskQueue::SchedEntityType::CONNECTOR));
-    _connector_scan_executor_with_workgroup->initialize(connector_num_io_threads);
+    _connector_scan_executor->initialize(connector_num_io_threads);
 
     starrocks::workgroup::DefaultWorkGroupInitialization default_workgroup_init;
 
-    _load_path_mgr = new LoadPathMgr(this);
+    if (store_paths.empty() && as_cn) {
+        _load_path_mgr = new DummyLoadPathMgr();
+    } else {
+        _load_path_mgr = new LoadPathMgr(this);
+    }
+
     _broker_mgr = new BrokerMgr(this);
     _bfd_parser = BfdParser::create();
     _load_channel_mgr = new LoadChannelMgr();
@@ -283,18 +306,15 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
                             .set_max_queue_size(1000)
                             .set_idle_timeout(MonoDelta::FromMilliseconds(2000))
                             .build(&scan_worker_thread_pool_with_workgroup));
-    _scan_executor_with_workgroup =
-            new workgroup::ScanExecutor(std::move(scan_worker_thread_pool_with_workgroup),
-                                        std::make_unique<workgroup::WorkGroupScanTaskQueue>(
-                                                workgroup::WorkGroupScanTaskQueue::SchedEntityType::OLAP));
-    _scan_executor_with_workgroup->initialize(num_io_threads);
+    _scan_executor = new workgroup::ScanExecutor(std::move(scan_worker_thread_pool_with_workgroup),
+                                                 std::make_unique<workgroup::WorkGroupScanTaskQueue>(
+                                                         workgroup::WorkGroupScanTaskQueue::SchedEntityType::OLAP));
+    _scan_executor->initialize(num_io_threads);
     // it means acting as compute node while store_path is empty. some threads are not needed for that case.
-    if (!store_paths.empty()) {
-        Status status = _load_path_mgr->init();
-        if (!status.ok()) {
-            LOG(ERROR) << "load path mgr init failed." << status.get_error_msg();
-            exit(-1);
-        }
+    Status status = _load_path_mgr->init();
+    if (!status.ok()) {
+        LOG(ERROR) << "load path mgr init failed." << status.get_error_msg();
+        exit(-1);
     }
 
 #if defined(USE_STAROS) && !defined(BE_TEST)
@@ -304,7 +324,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             new lake::TabletManager(_lake_location_provider, _lake_update_manager, config::lake_metadata_cache_limit);
     if (config::starlet_cache_dir.empty()) {
         std::vector<std::string> starlet_cache_paths;
-        std::for_each(store_paths.begin(), store_paths.end(), [&](StorePath root_path) {
+        std::for_each(store_paths.begin(), store_paths.end(), [&](const StorePath& root_path) {
             std::string starlet_cache_path = root_path.path + "/starlet_cache";
             starlet_cache_paths.emplace_back(starlet_cache_path);
         });
@@ -333,9 +353,6 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _spill_dir_mgr = std::make_shared<spill::DirManager>();
     RETURN_IF_ERROR(_spill_dir_mgr->init());
 
-#if defined(USE_STAROS) && !defined(BE_TEST)
-    _lake_tablet_manager->start_gc();
-#endif
     return Status::OK();
 }
 
@@ -477,6 +494,10 @@ void ExecEnv::_destroy() {
         _automatic_partition_pool->shutdown();
     }
 
+    if (_load_rpc_pool) {
+        _load_rpc_pool->shutdown();
+    }
+
     SAFE_DELETE(_agent_server);
     SAFE_DELETE(_runtime_filter_worker);
     SAFE_DELETE(_profile_report_worker);
@@ -498,8 +519,8 @@ void ExecEnv::_destroy() {
     SAFE_DELETE(_pipeline_prepare_pool);
     SAFE_DELETE(_pipeline_sink_io_pool);
     SAFE_DELETE(_query_rpc_pool);
-    SAFE_DELETE(_scan_executor_with_workgroup);
-    SAFE_DELETE(_connector_scan_executor_with_workgroup);
+    SAFE_DELETE(_scan_executor);
+    SAFE_DELETE(_connector_scan_executor);
     SAFE_DELETE(_thread_pool);
 
     if (_lake_tablet_manager != nullptr) {

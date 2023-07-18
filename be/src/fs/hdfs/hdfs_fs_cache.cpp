@@ -16,6 +16,7 @@
 
 #include <memory>
 
+#include "common/config.h"
 #include "gutil/strings/substitute.h"
 #include "util/hdfs_util.h"
 
@@ -23,8 +24,9 @@ namespace starrocks {
 
 // Try to get cloud properties from FSOptions, if cloud configuration not existed, return nullptr.
 // TODO(SmithCruise): Should remove when using cpp sdk
-static const std::vector<TCloudProperty>* get_cloud_properties(const FSOptions& options) {
+static const std::map<std::string, std::string> get_cloud_properties(const FSOptions& options) {
     const TCloudConfiguration* cloud_configuration = nullptr;
+    std::map<std::string, std::string> properties;
     if (options.cloud_configuration != nullptr) {
         // This branch is used by data lake
         cloud_configuration = options.cloud_configuration;
@@ -33,12 +35,19 @@ static const std::vector<TCloudProperty>* get_cloud_properties(const FSOptions& 
         cloud_configuration = &options.hdfs_properties()->cloud_configuration;
     }
     if (cloud_configuration != nullptr) {
-        return &cloud_configuration->cloud_properties;
+        if (cloud_configuration->__isset.cloud_properties) {
+            for (const auto& cloud_property : cloud_configuration->cloud_properties) {
+                properties.insert({cloud_property.key, cloud_property.value});
+            }
+            return properties;
+        } else {
+            return cloud_configuration->cloud_properties_v2;
+        }
     }
-    return nullptr;
+    return properties;
 }
 
-static Status create_hdfs_fs_handle(const std::string& namenode, std::shared_ptr<HdfsFsClient> hdfs_client,
+static Status create_hdfs_fs_handle(const std::string& namenode, const std::shared_ptr<HdfsFsClient>& hdfs_client,
                                     const FSOptions& options) {
     auto hdfs_builder = hdfsNewBuilder();
     hdfsBuilderSetNameNode(hdfs_builder, namenode.c_str());
@@ -54,12 +63,23 @@ static Status create_hdfs_fs_handle(const std::string& namenode, std::shared_ptr
 
     // Insert cloud properties(key-value paired) into Hadoop configuration
     // TODO(SmithCruise): Should remove when using cpp sdk
-    const std::vector<TCloudProperty>* cloud_properties = get_cloud_properties(options);
-    if (cloud_properties != nullptr) {
-        for (const auto& cloud_property : *cloud_properties) {
-            hdfsBuilderConfSetStr(hdfs_builder, cloud_property.key.data(), cloud_property.value.data());
+    const std::map<std::string, std::string> cloud_properties = get_cloud_properties(options);
+    if (!cloud_properties.empty()) {
+        for (const auto& cloud_property : cloud_properties) {
+            hdfsBuilderConfSetStr(hdfs_builder, cloud_property.first.data(), cloud_property.second.data());
         }
     }
+
+    // Set for hdfs client hedged read
+    std::string hedged_read_threadpool_size = std::to_string(config::hdfs_client_hedged_read_threadpool_size);
+    std::string hedged_read_threshold_millis = std::to_string(config::hdfs_client_hedged_read_threshold_millis);
+    if (config::hdfs_client_enable_hedged_read) {
+        hdfsBuilderConfSetStr(hdfs_builder, "dfs.client.hedged.read.threadpool.size",
+                              hedged_read_threadpool_size.data());
+        hdfsBuilderConfSetStr(hdfs_builder, "dfs.client.hedged.read.threshold.millis",
+                              hedged_read_threshold_millis.data());
+    }
+
     hdfs_client->hdfs_fs = hdfsBuilderConnect(hdfs_builder);
     if (hdfs_client->hdfs_fs == nullptr) {
         return Status::InternalError(strings::Substitute("fail to connect hdfs namenode, namenode=$0, err=$1", namenode,
@@ -78,23 +98,23 @@ Status HdfsFsCache::get_connection(const std::string& namenode, std::shared_ptr<
     }
 
     // Insert cloud properties into cache key
-    const std::vector<TCloudProperty>* cloud_properties = get_cloud_properties(options);
-    if (cloud_properties != nullptr) {
-        for (const auto& cloud_property : *cloud_properties) {
-            cache_key += cloud_property.key;
-            cache_key += cloud_property.value;
+    const std::map<std::string, std::string> cloud_properties = get_cloud_properties(options);
+    if (!cloud_properties.empty()) {
+        for (const auto& cloud_property : cloud_properties) {
+            cache_key += cloud_property.first;
+            cache_key += cloud_property.second;
         }
     }
 
     for (size_t idx = 0; idx < _cur_client_idx; idx++) {
         if (_cache_key[idx] == cache_key) {
             hdfs_client = _cache_clients[idx];
-            // Found cache client, return directly
+            // Found a cache client, return directly
             return Status::OK();
         }
     }
 
-    // Not found cached client, create a new one
+    // Not found a cached client, create a new one
     hdfs_client = std::make_shared<HdfsFsClient>();
     hdfs_client->namenode = namenode;
     RETURN_IF_ERROR(create_hdfs_fs_handle(namenode, hdfs_client, options));

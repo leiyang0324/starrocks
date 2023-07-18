@@ -113,7 +113,11 @@ public class Table extends MetaObject implements Writable, GsonPostProcessable {
         @SerializedName("LAKE_MATERIALIZED_VIEW") // for backward and rollback compatibility
         CLOUD_NATIVE_MATERIALIZED_VIEW,
         @SerializedName("TABLE_FUNCTION")
-        TABLE_FUNCTION;
+        TABLE_FUNCTION,
+        @SerializedName("PAIMON")
+        PAIMON,
+        @SerializedName("HIVE_VIEW")
+        HIVE_VIEW;
 
         public static String serialize(TableType type) {
             if (type == CLOUD_NATIVE) {
@@ -212,7 +216,8 @@ public class Table extends MetaObject implements Writable, GsonPostProcessable {
             }
         } else {
             // Only view in with-clause have null base
-            Preconditions.checkArgument(type == TableType.VIEW, "Table has no columns");
+            Preconditions.checkArgument(type == TableType.VIEW || type == TableType.HIVE_VIEW,
+                    "Table has no columns");
         }
         this.createTime = Instant.now().getEpochSecond();
         this.relatedMaterializedViews = Sets.newConcurrentHashSet();
@@ -321,6 +326,10 @@ public class Table extends MetaObject implements Writable, GsonPostProcessable {
         return type == TableType.DELTALAKE;
     }
 
+    public boolean isPaimonTable() {
+        return type == TableType.PAIMON;
+    }
+
     // for create table
     public boolean isOlapOrCloudNativeTable() {
         return isOlapTable() || isCloudNativeTable();
@@ -368,6 +377,11 @@ public class Table extends MetaObject implements Writable, GsonPostProcessable {
 
     public long getCreateTime() {
         return createTime;
+    }
+
+    public String getTableLocation() {
+        String msg = "The getTableLocation() method needs to be implemented.";
+        throw new NotImplementedException(msg);
     }
 
     public TTableDescriptor toThrift(List<ReferencedPartitionInfo> partitions) {
@@ -509,6 +523,10 @@ public class Table extends MetaObject implements Writable, GsonPostProcessable {
         return Collections.emptyList();
     }
 
+    public PhysicalPartition getPhysicalPartition(long partitionId) {
+        return null;
+    }
+
     public Set<String> getDistributionColumnNames() {
         return Collections.emptySet();
     }
@@ -558,7 +576,16 @@ public class Table extends MetaObject implements Writable, GsonPostProcessable {
         if (!Strings.isNullOrEmpty(comment)) {
             return comment;
         }
-        return type.name();
+        return "";
+    }
+
+    // Attention: cause the remove escape character in parser phase, when you want to print the
+    // comment, you need add the escape character back
+    public String getDisplayComment() {
+        if (!Strings.isNullOrEmpty(comment)) {
+            return CatalogUtils.addEscapeCharacter(comment);
+        }
+        return "";
     }
 
     public void setComment(String comment) {
@@ -620,8 +647,12 @@ public class Table extends MetaObject implements Writable, GsonPostProcessable {
     /**
      * onCreate is called when this table is created
      */
-    public void onCreate() {
+    public void onReload() {
         // Do nothing by default.
+    }
+
+    public void onCreate(Database database) {
+        onReload();
     }
 
     /**

@@ -274,8 +274,8 @@ class ParquetScannerTest : public ::testing::Test {
 
     template <bool is_nullable>
     ChunkPtr get_chunk(const std::vector<std::string>& columns_from_file,
-                              const std::unordered_map<size_t, ::starrocks::TExpr>& dst_slot_exprs,
-                              std::string specific_file, size_t expected_rows) {
+                       const std::unordered_map<size_t, ::starrocks::TExpr>& dst_slot_exprs, std::string specific_file,
+                       size_t expected_rows) {
         std::vector<std::string> file_names{std::move(specific_file)};
         const std::vector<std::string>& column_names = columns_from_file;
 
@@ -668,7 +668,6 @@ TEST_F(ParquetScannerTest, int96_timestamp) {
     }
 }
 
-
 TEST_F(ParquetScannerTest, get_file_schema) {
     const std::vector<std::pair<std::string, std::vector<std::pair<std::string, LogicalType>>>> test_cases = {
             {test_exec_dir + "/test_data/parquet_data/int96_timestamp.parquet", {{"col_datetime", TYPE_DATETIME}}},
@@ -696,7 +695,12 @@ TEST_F(ParquetScannerTest, get_file_schema) {
               {"col_json_list_struct", TYPE_VARCHAR},
               {"col_json_struct_struct", TYPE_VARCHAR},
               {"col_json_struct_string", TYPE_VARCHAR},
-              {"col_json_json_string", TYPE_VARCHAR}}}};
+              {"col_json_json_string", TYPE_VARCHAR}}},
+            {test_exec_dir + "/test_data/parquet_data/decimal.parquet",
+             {{"col_decimal32", TYPE_DECIMAL32},
+              {"col_decimal64", TYPE_DECIMAL64},
+              {"col_decimal128_byte_array", TYPE_DECIMAL128},
+              {"col_decimal128_fixed_len_byte_array", TYPE_DECIMAL128}}}};
 
     for (const auto& test_case : test_cases) {
         check_schema(test_case.first, test_case.second);

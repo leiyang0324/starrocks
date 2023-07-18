@@ -678,11 +678,11 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 36. D
 -- !result
 select array_agg(s_1) from array_test;
 -- result:
-[["a","b","c"],["a",null,"c","e","d"],["-1","10","1","100","2"],null]
+[["-1","10","1","100","2"],null,["a","b","c"],["a",null,"c","e","d"]]
 -- !result
 select array_agg(i_1) from array_test;
 -- result:
-[[1,2,3,4,10],[1,2,3,4,10],null,[1,2,3,4,10]]
+[null,[1,2,3,4,10],[1,2,3,4,10],[1,2,3,4,10]]
 -- !result
 select array_agg(f_1) from array_test;
 -- result:
@@ -698,7 +698,7 @@ select array_agg(d_2) from array_test;
 -- !result
 select array_agg(d_3) from array_test;
 -- result:
-[[4.0000000000000000000,2.1000000000000000000,3.2000000000000000000,10.0000000000000000000,1.1000000000000000000,-10.0000000000000000000,100.0000000000000000000,-1.0000000000000000000,1.0000000000000000000,2.0000000000000000000,3.0000000000000000000,4.3000000000000000000],[4.0000000000000000000,2.1000000000000000000,3.2000000000000000000,10.0000000000000000000,1.1000000000000000000,-10.0000000000000000000,100.0000000000000000000,-1.0000000000000000000,1.0000000000000000000,2.0000000000000000000,3.0000000000000000000,4.3000000000000000000],null,[40.0000000000000000000,20.1000000000000000000,3.2000000000000000000,10.0000000000000000000,10.1000000000000000000,-10.0000000000000000000,100.0000000000000000000,-1.0000000000000000000,10.0000000000000000000,2.0000000000000000000,30.0000000000000000000,4.3000000000000000000]]
+[null,[40.0000000000000000000,20.1000000000000000000,3.2000000000000000000,10.0000000000000000000,10.1000000000000000000,-10.0000000000000000000,100.0000000000000000000,-1.0000000000000000000,10.0000000000000000000,2.0000000000000000000,30.0000000000000000000,4.3000000000000000000],[4.0000000000000000000,2.1000000000000000000,3.2000000000000000000,10.0000000000000000000,1.1000000000000000000,-10.0000000000000000000,100.0000000000000000000,-1.0000000000000000000,1.0000000000000000000,2.0000000000000000000,3.0000000000000000000,4.3000000000000000000],[4.0000000000000000000,2.1000000000000000000,3.2000000000000000000,10.0000000000000000000,1.1000000000000000000,-10.0000000000000000000,100.0000000000000000000,-1.0000000000000000000,1.0000000000000000000,2.0000000000000000000,3.0000000000000000000,4.3000000000000000000]]
 -- !result
 select array_agg(d_4) from array_test;
 -- result:
@@ -706,7 +706,7 @@ select array_agg(d_4) from array_test;
 -- !result
 select array_agg(d_5) from array_test;
 -- result:
-[[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000],[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000],[40.000,20.100,30.000,10.100,40.300,30.200,-100.000,1000.000,1.000,100.000,-10.000,2.000],null]
+[[40.000,20.100,30.000,10.100,40.300,30.200,-100.000,1000.000,1.000,100.000,-10.000,2.000],null,[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000],[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000]]
 -- !result
 select array_agg(d_6) from array_test;
 -- result:
@@ -714,7 +714,7 @@ select array_agg(d_6) from array_test;
 -- !result
 select array_agg(ai_1) from array_test;
 -- result:
-[[[1,2,3,4],[5,2,6,4],[100,-1,92,8],[66,4,32,-10]],[[1,2,3,null,4],[5,2,6,4],null,[100,-1,92,8],[66,4,32,-10]],null,[[1,2,30,4],[50,2,6,4],[100,-10,92,8],[66,40,32,-100]]]
+[null,[[1,2,30,4],[50,2,6,4],[100,-10,92,8],[66,40,32,-100]],[[1,2,3,4],[5,2,6,4],[100,-1,92,8],[66,4,32,-10]],[[1,2,3,null,4],[5,2,6,4],null,[100,-1,92,8],[66,4,32,-10]]]
 -- !result
 select array_agg(as_1) from array_test;
 -- result:
@@ -722,11 +722,11 @@ select array_agg(as_1) from array_test;
 -- !result
 select array_agg(aas_1) from array_test;
 -- result:
-[[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],["-2","10"],["100","23"]]],[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],null,["-2","10"],["100","23"]]],[[["10"],["20"],["30"]],[["60"],["5"],["4"]],[["-100","-2"],["-20","10"],["100","23"]]],null]
+[[[["10"],["20"],["30"]],[["60"],["5"],["4"]],[["-100","-2"],["-20","10"],["100","23"]]],null,[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],["-2","10"],["100","23"]]],[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],null,["-2","10"],["100","23"]]]]
 -- !result
 select array_agg(aad_1) from array_test;
 -- result:
-[[[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]]],[[[1.00],null,[2.00],[3.00]],[[6.00],[5.00],[4.00]],null,[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]]],[[[10.00],[20.00],[30.00]],[[60.00],[50.00],[4.00]],[[-1.00,-2.00],[-2.00,100.00],[100.00,23.00]]],null]
+[[[[10.00],[20.00],[30.00]],[[60.00],[50.00],[4.00]],[[-1.00,-2.00],[-2.00,100.00],[100.00,23.00]]],null,[[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]]],[[[1.00],null,[2.00],[3.00]],[[6.00],[5.00],[4.00]],null,[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]]]]
 -- !result
 select array_agg(NULL) from array_test;
 -- result:
@@ -1282,6 +1282,29 @@ select array_contains([[1,2,3], [2,3,4]], 100) from array_test order by pk;
 -- result:
 E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 45. Detail message: No matching function with signature: array_contains(array<array<tinyint(4)>>, tinyint(4)).')
 -- !result
+select array_contains([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], parse_json('{"addr": 1}'));
+-- result:
+1
+-- !result
+select array_contains([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], parse_json('{"addr": 3}'));
+-- result:
+0
+-- !result
+select array_contains_all([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], 
+                          [parse_json('{"addr": 1}')]);
+-- result:
+1
+-- !result
+select array_contains_all([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], 
+                          [parse_json('{"addr": 1}'), parse_json('{"addr": 2}')]);
+-- result:
+1
+-- !result
+select array_contains_all([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], 
+                          [parse_json('{"addr": 1}'), parse_json('{"addr": 2}'), parse_json('{"addr": 3}')]);
+-- result:
+0
+-- !result
 select array_remove(s_1, 1) from array_test order by pk;
 -- result:
 ["a","b","c"]
@@ -1379,6 +1402,14 @@ select array_remove([[1,2,3], [2,3,4]], 1) from array_test order by pk;
 -- result:
 E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 41. Detail message: No matching function with signature: array_remove(array<array<tinyint(4)>>, tinyint(4)).')
 -- !result
+select array_remove([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], parse_json('{"addr": 1}'));
+-- result:
+['{"addr": 2}']
+-- !result
+select array_remove([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], parse_json('{"addr": 3}'));
+-- result:
+['{"addr": 1}','{"addr": 2}']
+-- !result
 select array_position(s_1, 1) from array_test order by pk;
 -- result:
 0
@@ -1443,35 +1474,35 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. D
 -- !result
 select arrays_overlap(s_1, 1) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 28. Detail message: No matching function with signature: arrays_overlap(array<varchar(65533)>, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 28. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap(d_1, 3) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 28. Detail message: No matching function with signature: arrays_overlap(array<decimal128(26, 2)>, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 28. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap(as_1, 100) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 31. Detail message: No matching function with signature: arrays_overlap(array<array<varchar(65533)>>, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 31. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap(aas_1, -10) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 32. Detail message: No matching function with signature: arrays_overlap(array<array<array<varchar(65533)>>>, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 32. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap(NULL, -1) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 30. Detail message: No matching function with signature: arrays_overlap(NULL_TYPE, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 30. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap([1.0,2.1,3.2,4.3], 1) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 42. Detail message: No matching function with signature: arrays_overlap(array<decimal32(2, 1)>, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 42. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap(['a', 'b', 'c'], 1) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 40. Detail message: No matching function with signature: arrays_overlap(array<varchar>, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 40. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap([[1,2,3], [2,3,4]], 3) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. Detail message: No matching function with signature: arrays_overlap(array<array<tinyint(4)>>, tinyint(4)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. Detail message: 2-th input of arrays_overlap should be an array, rather than tinyint(4).')
 -- !result
 select arrays_overlap(s_1, s_1) from array_test order by pk;
 -- result:
@@ -2072,6 +2103,16 @@ None
 None
 None
 None
+-- !result
+select arrays_overlap([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], 
+                        [parse_json('{"addr": 2}'), parse_json('{"addr": 3}')]);
+-- result:
+1
+-- !result
+select arrays_overlap([parse_json('{"addr": 1}'), parse_json('{"addr": 2}')], 
+                        [parse_json('{"addr": 3}'), parse_json('{"addr": 4}')]);
+-- result:
+0
 -- !result
 select array_slice(s_1, 1) from array_test order by pk;
 -- result:
@@ -2937,10 +2978,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. D
 -- !result
 select array_concat(ai_1, s_1) from array_test order by pk;
 -- result:
-[[1,2,3,4],[5,2,6,4],[100,-1,92,8],[66,4,32,-10],null,null,null]
-None
-None
-[[1,2,3,null,4],[5,2,6,4],null,[100,-1,92,8],[66,4,32,-10],null,null,null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 29. Detail message: No matching function with signature: array_concat(array<array<bigint(20)>>, array<varchar(65533)>).')
 -- !result
 select array_concat(ai_1, i_1) from array_test order by pk;
 -- result:
@@ -2967,10 +3005,10 @@ None
 -- !result
 select array_concat(ai_1, as_1) from array_test order by pk;
 -- result:
-[[1,2,3,4],[5,2,6,4],[100,-1,92,8],[66,4,32,-10],[1,2,3,4],[-1,null,-100,100],[null,null,null]]
+[["1","2","3","4"],["5","2","6","4"],["100","-1","92","8"],["66","4","32","-10"],["1","2","3","4"],["-1","a","-100","100"],["a","b","c"]]
 None
-[[1,2,30,4],[50,2,6,4],[100,-10,92,8],[66,40,32,-100],[1,20,3,4],[-1,null,-100,100],[null,null,null]]
-[[1,2,3,null,4],[5,2,6,4],null,[100,-1,92,8],[66,4,32,-10],[1,2,3,4],[-1,null,-100,100],[null,null,null]]
+[["1","2","30","4"],["50","2","6","4"],["100","-10","92","8"],["66","40","32","-100"],["1","20","3","4"],["-1","a00","-100","100"],["a","b0","c"]]
+[["1","2","3",null,"4"],["5","2","6","4"],null,["100","-1","92","8"],["66","4","32","-10"],["1","2","3","4"],["-1","a","-100","100"],["a","b","c"]]
 -- !result
 select array_concat(ai_1, aas_1) from array_test order by pk;
 -- result:
@@ -2993,10 +3031,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. D
 -- !result
 select array_concat(ai_1, ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[[1,2,3,4],[5,2,6,4],[100,-1,92,8],[66,4,32,-10],null,null,null]
-None
-[[1,2,30,4],[50,2,6,4],[100,-10,92,8],[66,40,32,-100],null,null,null]
-[[1,2,3,null,4],[5,2,6,4],null,[100,-1,92,8],[66,4,32,-10],null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 41. Detail message: No matching function with signature: array_concat(array<array<bigint(20)>>, array<varchar>).')
 -- !result
 select array_concat(ai_1, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3007,10 +3042,7 @@ None
 -- !result
 select array_concat(as_1, s_1) from array_test order by pk;
 -- result:
-[["1","2","3","4"],["-1","a","-100","100"],["a","b","c"],null,null,null]
-None
-None
-[["1","2","3","4"],["-1","a","-100","100"],["a","b","c"],null,null,null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 29. Detail message: No matching function with signature: array_concat(array<array<varchar(65533)>>, array<varchar(65533)>).')
 -- !result
 select array_concat(as_1, i_1) from array_test order by pk;
 -- result:
@@ -3059,10 +3091,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. D
 -- !result
 select array_concat(as_1, ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[["1","2","3","4"],["-1","a","-100","100"],["a","b","c"],null,null,null]
-None
-[["1","20","3","4"],["-1","a00","-100","100"],["a","b0","c"],null,null,null]
-[["1","2","3","4"],["-1","a","-100","100"],["a","b","c"],null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 41. Detail message: No matching function with signature: array_concat(array<array<varchar(65533)>>, array<varchar>).')
 -- !result
 select array_concat(as_1, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3073,10 +3102,7 @@ None
 -- !result
 select array_concat(aas_1, s_1) from array_test order by pk;
 -- result:
-[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],["-2","10"],["100","23"]],null,null,null]
-[[["10"],["20"],["30"]],[["60"],["5"],["4"]],[["-100","-2"],["-20","10"],["100","23"]],null,null,null,null,null]
-None
-[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],null,["-2","10"],["100","23"]],null,null,null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 30. Detail message: No matching function with signature: array_concat(array<array<array<varchar(65533)>>>, array<varchar(65533)>).')
 -- !result
 select array_concat(aas_1, i_1) from array_test order by pk;
 -- result:
@@ -3117,10 +3143,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 44. D
 -- !result
 select array_concat(aas_1, ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],["-2","10"],["100","23"]],null,null,null]
-[[["10"],["20"],["30"]],[["60"],["5"],["4"]],[["-100","-2"],["-20","10"],["100","23"]],null,null,null]
-None
-[[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],null,["-2","10"],["100","23"]],null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 42. Detail message: No matching function with signature: array_concat(array<array<array<varchar(65533)>>>, array<varchar>).')
 -- !result
 select array_concat(aas_1, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3128,10 +3151,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 45. D
 -- !result
 select array_concat(aad_1, s_1) from array_test order by pk;
 -- result:
-[[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],null,null,null]
-[[[10.00],[20.00],[30.00]],[[60.00],[50.00],[4.00]],[[-1.00,-2.00],[-2.00,100.00],[100.00,23.00]],null,null,null,null,null]
-None
-[[[1.00],null,[2.00],[3.00]],[[6.00],[5.00],[4.00]],null,[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],null,null,null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 30. Detail message: No matching function with signature: array_concat(array<array<array<decimal128(26, 2)>>>, array<varchar(65533)>).')
 -- !result
 select array_concat(aad_1, i_1) from array_test order by pk;
 -- result:
@@ -3159,17 +3179,14 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 31. D
 -- !result
 select array_concat(aad_1, as_1) from array_test order by pk;
 -- result:
-[[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],[null,null,null,null],[null,null,null,null],[null,null,null]]
-None
-None
-[[[1.00],null,[2.00],[3.00]],[[6.00],[5.00],[4.00]],null,[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],[null,null,null,null],[null,null,null,null],[null,null,null]]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 31. Detail message: No matching function with signature: array_concat(array<array<array<decimal128(26, 2)>>>, array<array<varchar(65533)>>).')
 -- !result
 select array_concat(aad_1, aas_1) from array_test order by pk;
 -- result:
-[[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]]]
-[[[10.00],[20.00],[30.00]],[[60.00],[50.00],[4.00]],[[-1.00,-2.00],[-2.00,100.00],[100.00,23.00]],[[10.00],[20.00],[30.00]],[[60.00],[5.00],[4.00]],[[-100.00,-2.00],[-20.00,10.00],[100.00,23.00]]]
+[[["1.00"],["2.00"],["3.00"]],[["6.00"],["5.00"],["4.00"]],[["-1.00","-2.00"],["-2.00","10.00"],["100.00","23.00"]],[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],["-2","10"],["100","23"]]]
+[[["10.00"],["20.00"],["30.00"]],[["60.00"],["50.00"],["4.00"]],[["-1.00","-2.00"],["-2.00","100.00"],["100.00","23.00"]],[["10"],["20"],["30"]],[["60"],["5"],["4"]],[["-100","-2"],["-20","10"],["100","23"]]]
 None
-[[[1.00],null,[2.00],[3.00]],[[6.00],[5.00],[4.00]],null,[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],null,[-2.00,10.00],[100.00,23.00]]]
+[[["1.00"],null,["2.00"],["3.00"]],[["6.00"],["5.00"],["4.00"]],null,[["-1.00","-2.00"],["-2.00","10.00"],["100.00","23.00"]],[["1"],["2"],["3"]],[["6"],["5"],["4"]],[["-1","-2"],null,["-2","10"],["100","23"]]]
 -- !result
 select array_concat(aad_1, aad_1) from array_test order by pk;
 -- result:
@@ -3191,10 +3208,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 44. D
 -- !result
 select array_concat(aad_1, ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],null,null,null]
-[[[10.00],[20.00],[30.00]],[[60.00],[50.00],[4.00]],[[-1.00,-2.00],[-2.00,100.00],[100.00,23.00]],null,null,null]
-None
-[[[1.00],null,[2.00],[3.00]],[[6.00],[5.00],[4.00]],null,[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]],null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 42. Detail message: No matching function with signature: array_concat(array<array<array<decimal128(26, 2)>>>, array<varchar>).')
 -- !result
 select array_concat(aad_1, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3223,7 +3237,10 @@ None
 -- !result
 select array_concat(NULL, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 44. Detail message: No matching function with signature: array_concat(NULL_TYPE, array<array<tinyint(4)>>).')
+None
+None
+None
+None
 -- !result
 select array_concat([1.0,2.1,3.2,4.3], s_1) from array_test order by pk;
 -- result:
@@ -3358,10 +3375,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 55. D
 -- !result
 select array_concat([[1,2,3], [2,3,4]], s_1) from array_test order by pk;
 -- result:
-[[1,2,3],[2,3,4],null,null,null]
-[[1,2,3],[2,3,4],null,null,null,null,null]
-None
-[[1,2,3],[2,3,4],null,null,null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. Detail message: No matching function with signature: array_concat(array<array<tinyint(4)>>, array<varchar(65533)>).')
 -- !result
 select array_concat([[1,2,3], [2,3,4]], d_1) from array_test order by pk;
 -- result:
@@ -3373,10 +3387,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 43. D
 -- !result
 select array_concat([[1,2,3], [2,3,4]], ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[[1,2,3],[2,3,4],null,null,null]
-[[1,2,3],[2,3,4],null,null,null]
-[[1,2,3],[2,3,4],null,null,null]
-[[1,2,3],[2,3,4],null,null,null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 55. Detail message: No matching function with signature: array_concat(array<array<tinyint(4)>>, array<varchar>).')
 -- !result
 select array_concat([[1,2,3], [2,3,4]], [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3402,7 +3413,7 @@ None
 select array_intersect(s_1, f_1) from array_test order by pk;
 -- result:
 []
-["-1","100","10"]
+["-1","10","100"]
 None
 [null]
 -- !result
@@ -3524,10 +3535,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 46. D
 -- !result
 select array_intersect(ai_1, ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[]
-None
-[]
-[null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 44. Detail message: No matching function with signature: array_intersect(array<array<bigint(20)>>, array<varchar>).')
 -- !result
 select array_intersect(ai_1, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3538,10 +3546,7 @@ None
 -- !result
 select array_intersect(as_1, s_1) from array_test order by pk;
 -- result:
-[]
-None
-None
-[]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 32. Detail message: No matching function with signature: array_intersect(array<array<varchar(65533)>>, array<varchar(65533)>).')
 -- !result
 select array_intersect(as_1, i_1) from array_test order by pk;
 -- result:
@@ -3560,10 +3565,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 46. D
 -- !result
 select array_intersect(as_1, ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[]
-None
-[]
-[]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 44. Detail message: No matching function with signature: array_intersect(array<array<varchar(65533)>>, array<varchar>).')
 -- !result
 select array_intersect(as_1, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3574,10 +3576,7 @@ None
 -- !result
 select array_intersect(aas_1, s_1) from array_test order by pk;
 -- result:
-[]
-[]
-None
-[]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 33. Detail message: No matching function with signature: array_intersect(array<array<array<varchar(65533)>>>, array<varchar(65533)>).')
 -- !result
 select array_intersect(aas_1, i_1) from array_test order by pk;
 -- result:
@@ -3593,10 +3592,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 33. D
 -- !result
 select array_intersect(aad_1, s_1) from array_test order by pk;
 -- result:
-[]
-[]
-None
-[null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 33. Detail message: No matching function with signature: array_intersect(array<array<array<decimal128(26, 2)>>>, array<varchar(65533)>).')
 -- !result
 select array_intersect(aad_1, i_1) from array_test order by pk;
 -- result:
@@ -3620,17 +3616,14 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 34. D
 -- !result
 select array_intersect(aad_1, as_1) from array_test order by pk;
 -- result:
-[]
-None
-None
-[]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 34. Detail message: No matching function with signature: array_intersect(array<array<array<decimal128(26, 2)>>>, array<array<varchar(65533)>>).')
 -- !result
 select array_intersect(aad_1, aas_1) from array_test order by pk;
 -- result:
-[[[1.00],[2.00],[3.00]],[[6.00],[5.00],[4.00]],[[-1.00,-2.00],[-2.00,10.00],[100.00,23.00]]]
-[[[10.00],[20.00],[30.00]]]
+[]
+[]
 None
-[[[6.00],[5.00],[4.00]]]
+[]
 -- !result
 select array_intersect(aad_1, aad_1) from array_test order by pk;
 -- result:
@@ -3652,10 +3645,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 47. D
 -- !result
 select array_intersect(aad_1, ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[]
-[]
-None
-[null]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 45. Detail message: No matching function with signature: array_intersect(array<array<array<decimal128(26, 2)>>>, array<varchar>).')
 -- !result
 select array_intersect(aad_1, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3663,11 +3653,17 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 48. D
 -- !result
 select array_intersect(NULL, as_1) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 33. Detail message: No matching function with signature: array_intersect(NULL_TYPE, array<array<varchar(65533)>>).')
+None
+None
+None
+None
 -- !result
 select array_intersect(NULL, aad_1) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 34. Detail message: No matching function with signature: array_intersect(NULL_TYPE, array<array<array<decimal128(26, 2)>>>).')
+None
+None
+None
+None
 -- !result
 select array_intersect(NULL, NULL) from array_test order by pk;
 -- result:
@@ -3685,7 +3681,10 @@ None
 -- !result
 select array_intersect(NULL, [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 47. Detail message: No matching function with signature: array_intersect(NULL_TYPE, array<array<tinyint(4)>>).')
+None
+None
+None
+None
 -- !result
 select array_intersect([1.0,2.1,3.2,4.3], s_1) from array_test order by pk;
 -- result:
@@ -3779,10 +3778,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 58. D
 -- !result
 select array_intersect([[1,2,3], [2,3,4]], s_1) from array_test order by pk;
 -- result:
-[]
-[]
-None
-[]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 46. Detail message: No matching function with signature: array_intersect(array<array<tinyint(4)>>, array<varchar(65533)>).')
 -- !result
 select array_intersect([[1,2,3], [2,3,4]], i_1) from array_test order by pk;
 -- result:
@@ -3827,10 +3823,7 @@ E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 60. D
 -- !result
 select array_intersect([[1,2,3], [2,3,4]], ['a', 'b', 'c']) from array_test order by pk;
 -- result:
-[]
-[]
-[]
-[]
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 58. Detail message: No matching function with signature: array_intersect(array<array<tinyint(4)>>, array<varchar>).')
 -- !result
 select array_intersect([[1,2,3], [2,3,4]], [[1,2,3], [2,3,4]]) from array_test order by pk;
 -- result:
@@ -3838,6 +3831,166 @@ select array_intersect([[1,2,3], [2,3,4]], [[1,2,3], [2,3,4]]) from array_test o
 [[1,2,3],[2,3,4]]
 [[1,2,3],[2,3,4]]
 [[1,2,3],[2,3,4]]
+-- !result
+select all_match((x,y) -> x < y, null, [4,5,6]);
+-- result:
+None
+-- !result
+select all_match((x,y) -> x < y, [], []);
+-- result:
+1
+-- !result
+select all_match((x,y) -> x < y, null, []);
+-- result:
+None
+-- !result
+select all_match((x,y) -> x < y, null, null);
+-- result:
+None
+-- !result
+select any_match((x,y) -> x < y, null, [4,5,6]);
+-- result:
+None
+-- !result
+select any_match((x,y) -> x < y, [], []);
+-- result:
+0
+-- !result
+select any_match((x,y) -> x < y, null, []);
+-- result:
+None
+-- !result
+select any_match((x,y) -> x < y, null, null);
+-- result:
+None
+-- !result
+select all_match([0],x->1);
+-- result:
+1
+-- !result
+select any_match([0],x->1);
+-- result:
+1
+-- !result
+select any_match([],x->1);
+-- result:
+0
+-- !result
+select any_match(null);
+-- result:
+None
+-- !result
+select any_match([]);
+-- result:
+0
+-- !result
+select all_match([]);
+-- result:
+1
+-- !result
+select any_match((x,y) -> x < y, [1,2,8], [4,5,6]);
+-- result:
+1
+-- !result
+select any_match((x,y) -> x < y, [11,12,8], [4,5,6]);
+-- result:
+0
+-- !result
+select any_match((x,y) -> x < y, [11,12,null], [4,5,6]);
+-- result:
+None
+-- !result
+select all_match((x,y) -> x < y, [1,2,null], [4,5,6]);
+-- result:
+None
+-- !result
+select all_match(s_1, x->x is null) from array_test order by pk;
+-- result:
+0
+0
+None
+0
+-- !result
+select s_1, any_match(s_1, x->x is null) from array_test order by pk;
+-- result:
+["a","b","c"]	0
+["-1","10","1","100","2"]	0
+None	None
+["a",null,"c","e","d"]	1
+-- !result
+select d_6, d_5, all_match(d_6,d_5, (x,y)->x >y) from array_test order by pk;
+-- result:
+[4.000000,2.100000,100.000000,1.000000,4.300000,3.200000,10.000000,2.000000,3.000000,1.100000,-1.000000,-10.000000]	[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000]	None
+[40.000000,20.100000,1000.000000,10.000000,40.300000,30.200000,100.000000,20.000000,3.000000,10.100000,-10.000000,-10.000000]	[40.000,20.100,30.000,10.100,40.300,30.200,-100.000,1000.000,1.000,100.000,-10.000,2.000]	0
+None	None	None
+[4.000000,2.100000,100.000000,null,1.000000,4.300000,3.200000,10.000000,2.000000,3.000000,1.100000,-1.000000,-10.000000]	[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000]	None
+-- !result
+select d_6, d_5, any_match(d_6,d_5, (x,y)->x >y) from array_test order by pk;
+-- result:
+[4.000000,2.100000,100.000000,1.000000,4.300000,3.200000,10.000000,2.000000,3.000000,1.100000,-1.000000,-10.000000]	[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000]	None
+[40.000000,20.100000,1000.000000,10.000000,40.300000,30.200000,100.000000,20.000000,3.000000,10.100000,-10.000000,-10.000000]	[40.000,20.100,30.000,10.100,40.300,30.200,-100.000,1000.000,1.000,100.000,-10.000,2.000]	1
+None	None	None
+[4.000000,2.100000,100.000000,null,1.000000,4.300000,3.200000,10.000000,2.000000,3.000000,1.100000,-1.000000,-10.000000]	[4.000,2.100,3.000,1.100,4.300,3.200,-10.000,100.000,1.000,10.000,-1.000,2.000]	None
+-- !result
+select all_match((x,y) -> x < y, []);
+-- result:
+E: (1064, 'Getting analyzing error. Detail message: Lambda arguments should equal to lambda input arrays.')
+-- !result
+select all_match((x,y) -> x < y, [],{});
+-- result:
+E: (1064, "Getting syntax error at line 1, column 37. Detail message: Unexpected input '}', the most similar input is {'FN'}.")
+-- !result
+select all_match([],null);
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 24. Detail message: all_match should have a input array.')
+-- !result
+select all_match({});
+-- result:
+E: (1064, "Getting syntax error at line 1, column 18. Detail message: Unexpected input '}', the most similar input is {'FN'}.")
+-- !result
+select all_match();
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 17. Detail message: all_match should have a input array.')
+-- !result
+select all_match(null,[]);
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 24. Detail message: all_match should have a input array.')
+-- !result
+select all_match(null,null);
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 26. Detail message: all_match should have a input array.')
+-- !result
+select any_match((x,y) -> x < y, []);
+-- result:
+E: (1064, 'Getting analyzing error. Detail message: Lambda arguments should equal to lambda input arrays.')
+-- !result
+select any_match((x,y) -> x < y, [],{});
+-- result:
+E: (1064, "Getting syntax error at line 1, column 37. Detail message: Unexpected input '}', the most similar input is {'FN'}.")
+-- !result
+select any_match([],null);
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 24. Detail message: any_match should have a input array.')
+-- !result
+select any_match({});
+-- result:
+E: (1064, "Getting syntax error at line 1, column 18. Detail message: Unexpected input '}', the most similar input is {'FN'}.")
+-- !result
+select any_match();
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 17. Detail message: any_match should have a input array.')
+-- !result
+select any_match(null,[]);
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 24. Detail message: any_match should have a input array.')
+-- !result
+select any_match(null,null);
+-- result:
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 26. Detail message: any_match should have a input array.')
+-- !result
+select all_match([[]]);
+-- result:
+E: (1064, "Getting analyzing error from line 1, column 7 to line 1, column 21. Detail message: The second input of all_matchARRAY<ARRAY<NULL_TYPE>>  can't cast to ARRAY<BOOL>.")
 -- !result
 select array_sum(array_map(x->not like(x, 'starRocks'),s_1)) from array_test order by 1;
 -- result:
@@ -3852,7 +4005,7 @@ select array_contains( cast ('[40360,40361]' as array<int>), 40360);
 -- !result
 select array_contains_all( cast ('[40360,40361]' as array<int>), 40360);
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 70. Detail message: No matching function with signature: array_contains_all(array<int(11)>, int(11)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 70. Detail message: 2-th input of array_contains_all should be an array, rather than int(11).')
 -- !result
 select array_append( cast ('[40360,40361]' as array<int>), 40360);
 -- result:
@@ -3860,7 +4013,7 @@ select array_append( cast ('[40360,40361]' as array<int>), 40360);
 -- !result
 select array_avg( cast ('[40360,40361]' as array<int>), 40360);
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 61. Detail message: No matching function with signature: array_avg(array<int(11)>, int(11)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 61. Detail message: array_avg should have only one input.')
 -- !result
 select array_concat( cast ('[40360,40361]' as array<int>), [40360]);
 -- result:
@@ -3956,7 +4109,7 @@ None
 -- !result
 select array_contains_all( cast ('null' as array<int>), 40360);
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 61. Detail message: No matching function with signature: array_contains_all(array<int(11)>, int(11)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 61. Detail message: 2-th input of array_contains_all should be an array, rather than int(11).')
 -- !result
 select array_append( cast ('null' as array<int>), 40360);
 -- result:
@@ -3964,7 +4117,7 @@ None
 -- !result
 select array_avg( cast ('null' as array<int>), 40360);
 -- result:
-E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 52. Detail message: No matching function with signature: array_avg(array<int(11)>, int(11)).')
+E: (1064, 'Getting analyzing error from line 1, column 7 to line 1, column 52. Detail message: array_avg should have only one input.')
 -- !result
 select array_concat( cast ('null' as array<int>), [40360]);
 -- result:
@@ -4053,4 +4206,140 @@ None
 select REVERSE( cast ('null' as array<int>));
 -- result:
 None
+-- !result
+select array_length([map{1:2, 2:3, 3:4}]);
+-- result:
+1
+-- !result
+select array_append([map{1:2, 2:3, 3:4}], map{3: null, 4:5});
+-- result:
+[{1:2,2:3,3:4},{3:null,4:5}]
+-- !result
+select array_contains([map{1:2, 2:3, 3:4}, map{3:4, 4:5}], map{3:4, 4:5});
+-- result:
+1
+-- !result
+select array_contains([map{1:2, 2:3, 3:4}, map{3:4, 4:5}], map{3:4, 5:5});
+-- result:
+0
+-- !result
+select array_contains([map{1:2, 2:3, 3:4}, map{3:4, 4:null}], map{3:4, 4:null});
+-- result:
+1
+-- !result
+select array_remove([map{1:2, 2:3, 3:4}, map{3:4, 4:5}], map{3:4, 4:5});
+-- result:
+[{1:2,2:3,3:4}]
+-- !result
+select array_position([map{1:2, 2:3, 3:4}, map{3:4, 4:5}], map{3:4, 4:5});
+-- result:
+2
+-- !result
+select array_distinct([map{1:2, 2:3, 3:4}, map{3:4, 4:5}, map{3:4, 4:5}, map{1:2, 2:3, 3:4}]);
+-- result:
+[{1:2,2:3,3:4},{3:4,4:5}]
+-- !result
+select reverse([map{1:2, 2:3, 3:4}, map{3:4, 4:5}]);
+-- result:
+[{3:4,4:5},{1:2,2:3,3:4}]
+-- !result
+select array_slice([map{1:2, 2:3, 3:4}, map{3:4, 4:5}, map{3:4, 4:5}, map{1:2, 2:3, 3:4}], 2, 3);
+-- result:
+[{3:4,4:5},{3:4,4:5},{1:2,2:3,3:4}]
+-- !result
+select array_concat([map{1:2, 2:3, 3:4}], [map{null:3, 4:null}]);
+-- result:
+[{1:2,2:3,3:4},{null:3,4:null}]
+-- !result
+select arrays_overlap([map{1:2, 2:3, 3:4}, map{3:4, 4:5}, map{3:4, 4:5}, map{1:2, 2:3, 3:4}], [map{1:2, 2:3, 3:4}]);
+-- result:
+1
+-- !result
+select array_intersect([map{1:2, 2:3, 3:4}, map{3:4, 4:5}, map{3:4, 4:5}, map{1:2, 2:3, 3:4}], [map{1:2, 2:3, 3:4}]);
+-- result:
+[{1:2,2:3,3:4}]
+-- !result
+select array_contains_all([map{1:2, 2:3, 3:4}, map{3:4, 4:5}, map{3:4, 4:5}, map{1:2, 2:3, 3:4}], [map{1:2, 2:3, 3:4}, map{3:4, 4:5}]);
+-- result:
+1
+-- !result
+select array_filter([map{1:2, 2:3, 3:4}, map{3:4, 4:5}, map{3:4, 4:5}, map{1:2, 2:3, 3:4}], [1,0,0,0]);
+-- result:
+[{1:2,2:3,3:4}]
+-- !result
+select cardinality([map{1:2, 2:3, 3:4}, map{3:4, 4:5}, map{3:4, 4:5}, map{1:2, 2:3, 3:4}]);
+-- result:
+4
+-- !result
+select array_length([row(1,2,3), row(3,4,5)]);
+-- result:
+2
+-- !result
+select array_append([row(1,2,3), row(3,4,5)], row(5,6,7));
+-- result:
+[{"col1":1,"col2":2,"col3":3},{"col1":3,"col2":4,"col3":5},{"col1":5,"col2":6,"col3":7}]
+-- !result
+select array_contains([row(1,2,3), row(3,4,5)], row(5,6,7));
+-- result:
+0
+-- !result
+select array_contains([row(1,2,3), row(3,4,5)], row(3,4,5));
+-- result:
+1
+-- !result
+select array_contains([row(1,2,3), row(3,4,null)], row(3,4,null));
+-- result:
+1
+-- !result
+select array_remove([row(1,2,3), row(3,4,5)], row(5,6,7));
+-- result:
+[{"col1":1,"col2":2,"col3":3},{"col1":3,"col2":4,"col3":5}]
+-- !result
+select array_remove([row(1,2,3), row(3,4,5)], row(3,4,5));
+-- result:
+[{"col1":1,"col2":2,"col3":3}]
+-- !result
+select array_remove([row(1,2,3), row(3,4,null)], row(3,4,null));
+-- result:
+[{"col1":1,"col2":2,"col3":3}]
+-- !result
+select array_position([row(1,2,3), row(3,4,5)], row(3,4,5));
+-- result:
+2
+-- !result
+select array_distinct([row(1,2,3), row(3,4,5), row(3,4,5)]);
+-- result:
+[{"col1":1,"col2":2,"col3":3},{"col1":3,"col2":4,"col3":5}]
+-- !result
+select reverse([row(1,2,3), row(3,4,5)]);
+-- result:
+[{"col1":3,"col2":4,"col3":5},{"col1":1,"col2":2,"col3":3}]
+-- !result
+select array_slice([row(1,2,3), row(3,4,5),row(4,5,6)] ,1,2);
+-- result:
+[{"col1":1,"col2":2,"col3":3},{"col1":3,"col2":4,"col3":5}]
+-- !result
+select array_concat([row(1,2,3), row(3,4,5)], [row(4,5,6), row(5,6,7)]);
+-- result:
+[{"col1":1,"col2":2,"col3":3},{"col1":3,"col2":4,"col3":5},{"col1":4,"col2":5,"col3":6},{"col1":5,"col2":6,"col3":7}]
+-- !result
+select arrays_overlap([row(1,2,3), row(3,4,5), row(4,5,6)], [row(3,4,5)]);
+-- result:
+1
+-- !result
+select array_intersect([row(1,2,3), row(3,4,5)], [row(3,4,5)]);
+-- result:
+[{"col1":3,"col2":4,"col3":5}]
+-- !result
+select array_contains_all([row(1,2,3), row(3,4,5)], [row(3,4,5)]);
+-- result:
+1
+-- !result
+select array_filter([row(1,2,3), row(3,4,5), row(4,5,6)], [0,1,0]);
+-- result:
+[{"col1":3,"col2":4,"col3":5}]
+-- !result
+select cardinality([row(1,2,3), row(3,4,5)]);
+-- result:
+2
 -- !result

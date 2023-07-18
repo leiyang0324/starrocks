@@ -71,12 +71,10 @@ public class ComputeNode implements IComputable, Writable {
     private final AtomicBoolean isDecommissioned;
     @SerializedName("decommissionType")
     private volatile int decommissionType;
-    @SerializedName("ownerClusterName")
-    private volatile String ownerClusterName;
+
     // to index the state in some cluster
     @SerializedName("backendState")
     private volatile int backendState;
-    // private BackendState backendState;
 
     @SerializedName("heartbeatErrMsg")
     private String heartbeatErrMsg = "";
@@ -112,7 +110,6 @@ public class ComputeNode implements IComputable, Writable {
         this.httpPort = 0;
         this.beRpcPort = 0;
 
-        this.ownerClusterName = "";
         this.backendState = Backend.BackendState.free.ordinal();
 
         this.decommissionType = DecommissionType.SystemDecommission.ordinal();
@@ -132,7 +129,6 @@ public class ComputeNode implements IComputable, Writable {
         this.isAlive = new AtomicBoolean(false);
         this.isDecommissioned = new AtomicBoolean(false);
 
-        this.ownerClusterName = "";
         this.backendState = Backend.BackendState.free.ordinal();
         this.decommissionType = DecommissionType.SystemDecommission.ordinal();
     }
@@ -186,8 +182,20 @@ public class ComputeNode implements IComputable, Writable {
         return brpcPort;
     }
 
+    public TNetworkAddress getAddress() {
+        return new TNetworkAddress(host, bePort);
+    }
+
     public TNetworkAddress getBrpcAddress() {
         return new TNetworkAddress(host, brpcPort);
+    }
+
+    public TNetworkAddress getBeRpcAddress() {
+        return new TNetworkAddress(host, beRpcPort);
+    }
+
+    public TNetworkAddress getHttpAddress() {
+        return new TNetworkAddress(host, httpPort);
     }
 
     public String getHeartbeatErrMsg() {
@@ -373,10 +381,6 @@ public class ComputeNode implements IComputable, Writable {
                 isAlive.get() + "]";
     }
 
-    public void clearClusterName() {
-        ownerClusterName = "";
-    }
-
     public Backend.BackendState getBackendState() {
         switch (backendState) {
             case 0:
@@ -482,6 +486,10 @@ public class ComputeNode implements IComputable, Writable {
             if (hbResponse.getRebootTime() > this.lastStartTime) {
                 this.lastStartTime = hbResponse.getRebootTime();
                 isChanged = true;
+                // reboot time change means the BE has been restarted
+                // but alive state may be not changed since the BE may be restarted in a short time
+                // we need notify coordinator to cancel query
+                becomeDead = true;
             }
 
             if (this.cpuCores != hbResponse.getCpuCores()) {

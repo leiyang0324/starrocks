@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 package com.starrocks.sql.optimizer.rule.tree;
 
 import com.google.common.base.Preconditions;
@@ -38,6 +37,7 @@ import com.starrocks.sql.optimizer.OptExpressionVisitor;
 import com.starrocks.sql.optimizer.Utils;
 import com.starrocks.sql.optimizer.base.ColumnRefFactory;
 import com.starrocks.sql.optimizer.base.ColumnRefSet;
+import com.starrocks.sql.optimizer.base.DistributionCol;
 import com.starrocks.sql.optimizer.base.HashDistributionDesc;
 import com.starrocks.sql.optimizer.base.HashDistributionSpec;
 import com.starrocks.sql.optimizer.base.LogicalProperty;
@@ -79,7 +79,7 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
-import static com.starrocks.sql.optimizer.operator.scalar.BinaryPredicateOperator.BinaryType.EQ_FOR_NULL;
+import static com.starrocks.analysis.BinaryType.EQ_FOR_NULL;
 
 /**
  * For a low cardinality string column with global dict, we will rewrite the plan to
@@ -248,7 +248,8 @@ public class AddDecodeNodeForDictStringRule implements TreeRewriteRule {
                     if (!usedCols.isEmpty()) {
                         Set<Integer> dictCols = usedCols.stream().map(e -> context.stringColumnIdToDictColumnIds.get(e))
                                 .collect(Collectors.toSet());
-                        if (!(globalDictIds.containsAll(dictCols) && couldApplyDictOptimize(operator, encodedStringCols))) {
+                        if (!(globalDictIds.containsAll(dictCols) &&
+                                couldApplyDictOptimize(operator, encodedStringCols))) {
                             return false;
                         }
                     }
@@ -256,7 +257,6 @@ public class AddDecodeNodeForDictStringRule implements TreeRewriteRule {
             }
             return true;
         }
-
 
         // create a new dictionary column and assign the same property except for the type and column id
         // the input column maybe a dictionary column or a string column
@@ -456,7 +456,7 @@ public class AddDecodeNodeForDictStringRule implements TreeRewriteRule {
                                     scanOperator.getDistributionSpec(), scanOperator.getLimit(), newPredicate,
                                     scanOperator.getSelectedIndexId(), scanOperator.getSelectedPartitionId(),
                                     scanOperator.getSelectedTabletId(), scanOperator.getPrunedPartitionPredicates(),
-                                    scanOperator.getProjection());
+                                    scanOperator.getProjection(), scanOperator.isUsePkIndex());
                     newOlapScan.setPreAggregation(scanOperator.isPreAggregation());
                     newOlapScan.setGlobalDicts(globalDicts);
                     // set output columns because of the projection is not encoded but the colRefToColumnMetaMap has encoded.
@@ -600,14 +600,14 @@ public class AddDecodeNodeForDictStringRule implements TreeRewriteRule {
                                                                  DecodeContext context) {
             HashDistributionSpec hashDistributionSpec = (HashDistributionSpec) exchangeOperator.getDistributionSpec();
 
-            List<Integer> shuffledColumns = Lists.newArrayList();
-            for (Integer columnId : hashDistributionSpec.getHashDistributionDesc().getColumns()) {
-                if (context.stringColumnIdToDictColumnIds.containsKey(columnId)) {
-                    Integer dictColumnId = context.stringColumnIdToDictColumnIds.get(columnId);
+            List<DistributionCol> shuffledColumns = Lists.newArrayList();
+            for (DistributionCol column : hashDistributionSpec.getHashDistributionDesc().getDistributionCols()) {
+                if (context.stringColumnIdToDictColumnIds.containsKey(column.getColId())) {
+                    Integer dictColumnId = context.stringColumnIdToDictColumnIds.get(column.getColId());
                     ColumnRefOperator dictColumn = context.columnRefFactory.getColumnRef(dictColumnId);
-                    shuffledColumns.add(dictColumn.getId());
+                    shuffledColumns.add(new DistributionCol(dictColumn.getId(), column.isNullStrict()));
                 } else {
-                    shuffledColumns.add(columnId);
+                    shuffledColumns.add(column);
                 }
             }
             exchangeOperator.setDistributionSpec(new HashDistributionSpec(new HashDistributionDesc(shuffledColumns,
@@ -739,7 +739,7 @@ public class AddDecodeNodeForDictStringRule implements TreeRewriteRule {
             final PhysicalHashAggregateOperator newHashAggregator =
                     new PhysicalHashAggregateOperator(aggOperator.getType(), newGroupBys, newPartitionsBy, newAggMap,
                             aggOperator.getSingleDistinctFunctionPos(), aggOperator.isSplit(), aggOperator.getLimit(),
-                            aggOperator.getPredicate(), aggOperator.getProjection());
+                            aggOperator.getPredicate(), aggOperator.getProjection(), aggOperator.isUseStreamingPreAgg());
             newHashAggregator.setUseSortAgg(aggOperator.isUseSortAgg());
             return newHashAggregator;
         }
@@ -964,7 +964,8 @@ public class AddDecodeNodeForDictStringRule implements TreeRewriteRule {
         result.setStatistics(childExpr.get(0).getStatistics());
 
         LogicalProperty decodeProperty = new LogicalProperty(childExpr.get(0).getLogicalProperty());
-        result.setLogicalProperty(DecodeVisitor.rewriteLogicProperty(decodeProperty, decodeOperator.getDictToStrings()));
+        result.setLogicalProperty(
+                DecodeVisitor.rewriteLogicProperty(decodeProperty, decodeOperator.getDictToStrings()));
         context.clear();
         return result;
     }

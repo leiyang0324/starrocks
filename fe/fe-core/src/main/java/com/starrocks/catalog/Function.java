@@ -89,11 +89,6 @@ public class Function implements Writable {
         // Nonstrict supertypes broaden the definition of supertype to accept implicit casts
         // of arguments that may result in loss of precision - e.g. decimal to float.
         IS_NONSTRICT_SUPERTYPE_OF,
-
-        // Used to drop UDF. User can drop function through name or name and arguments.
-        // If X is matchable with Y, this will only check X's element is identical with Y's.
-        // e.g. fn is matchable with fn(int), fn(float) and fn(int) is only matchable with fn(int).
-        IS_MATCHABLE
     }
 
     // for vectorized engine, function-id
@@ -255,6 +250,8 @@ public class Function implements Writable {
         this.userVisible = userVisible;
     }
 
+    // TODO: It's dangerous to change this directly because it may change the global function state.
+    // Make sure you use a copy of the global function.
     public void setArgsType(Type[] newTypes) {
         argTypes = newTypes;
     }
@@ -299,6 +296,8 @@ public class Function implements Writable {
         return checksum;
     }
 
+    // TODO: It's dangerous to change this directly because it may change the global function state.
+    // Make sure you use a copy of the global function.
     public void setRetType(Type retType) {
         this.retType = retType;
     }
@@ -349,8 +348,6 @@ public class Function implements Writable {
                 return isSubtype(other);
             case IS_NONSTRICT_SUPERTYPE_OF:
                 return isAssignCompatible(other);
-            case IS_MATCHABLE:
-                return isMatchable(other);
             default:
                 Preconditions.checkState(false);
                 return false;
@@ -431,27 +428,6 @@ public class Function implements Writable {
             }
         }
         return true;
-    }
-
-    private boolean isMatchable(Function o) {
-        if (!o.name.equals(name)) {
-            return false;
-        }
-        if (argTypes != null) {
-            if (o.argTypes.length != this.argTypes.length) {
-                return false;
-            }
-            if (o.hasVarArgs != this.hasVarArgs) {
-                return false;
-            }
-            for (int i = 0; i < this.argTypes.length; ++i) {
-                if (!o.argTypes[i].matchesType(this.argTypes[i])) {
-                    return false;
-                }
-            }
-        }
-        return true;
-
     }
 
     private boolean isIdentical(Function o) {

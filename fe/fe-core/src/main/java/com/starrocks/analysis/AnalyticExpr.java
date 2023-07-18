@@ -98,11 +98,13 @@ public class AnalyticExpr extends Expr {
     public static String DENSERANK = "DENSE_RANK";
     public static String ROWNUMBER = "ROW_NUMBER";
     public static String CUMEDIST = "CUME_DIST";
+    public static String PERCENTRANK = "PERCENT_RANK";
     public static String NTILE = "NTILE";
     public static String MIN = "MIN";
     public static String MAX = "MAX";
     public static String SUM = "SUM";
     public static String COUNT = "COUNT";
+    public static String ALLOCATE_SESSION = "ALLOCATE_SESSION";
 
     // The function of HLL_UNION_AGG can't be used with a window by now.
     public static String HLL_UNION_AGG = "HLL_UNION_AGG";
@@ -254,7 +256,7 @@ public class AnalyticExpr extends Expr {
             return false;
         }
 
-        return fn.functionName().equalsIgnoreCase(CUMEDIST);
+        return fn.functionName().equalsIgnoreCase(CUMEDIST) || fn.functionName().equalsIgnoreCase(PERCENTRANK);
     }
 
     public static boolean isRowNumberFn(Function fn) {

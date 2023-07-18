@@ -33,6 +33,7 @@ import mockit.Expectations;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.hadoop.HadoopFileIO;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -40,7 +41,6 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.stream.Stream;
-
 
 public class InsertPlanTest extends PlanTestBase {
     @BeforeClass
@@ -107,8 +107,7 @@ public class InsertPlanTest extends PlanTestBase {
                 "     tabletRatio=0/0\n" +
                 "     tabletList=\n" +
                 "     cardinality=1\n" +
-                "     avgRowSize=3.0\n" +
-                "     numNodes=0"));
+                "     avgRowSize=3.0\n"));
     }
 
     @Test
@@ -284,8 +283,7 @@ public class InsertPlanTest extends PlanTestBase {
                 "     tabletRatio=0/0\n" +
                 "     tabletList=\n" +
                 "     cardinality=1\n" +
-                "     avgRowSize=4.0\n" +
-                "     numNodes=0"));
+                "     avgRowSize=4.0\n"));
 
         sql = "insert into test.mysql_table(k1) select v1 from t0";
         explainString = getInsertExecPlan(sql);
@@ -308,8 +306,7 @@ public class InsertPlanTest extends PlanTestBase {
                 "     tabletRatio=0/0\n" +
                 "     tabletList=\n" +
                 "     cardinality=1\n" +
-                "     avgRowSize=3.0\n" +
-                "     numNodes=0"));
+                "     avgRowSize=3.0\n"));
     }
 
     @Test
@@ -370,7 +367,7 @@ public class InsertPlanTest extends PlanTestBase {
     }
 
     public static String getInsertExecPlan(String originStmt) throws Exception {
-        connectContext.setDumpInfo(new QueryDumpInfo(connectContext.getSessionVariable()));
+        connectContext.setDumpInfo(new QueryDumpInfo(connectContext));
         StatementBase statementBase =
                 com.starrocks.sql.parser.SqlParser.parse(originStmt, connectContext.getSessionVariable().getSqlMode())
                         .get(0);
@@ -751,22 +748,22 @@ public class InsertPlanTest extends PlanTestBase {
     @Test
     public void testInsertMapColumn() throws Exception {
         String explainString = getInsertExecPlan("insert into tmap values (2,2,map())");
-        Assert.assertTrue(explainString.contains("2 | 2 | {}"));
+        Assert.assertTrue(explainString.contains("2 | 2 | map{}"));
 
         explainString = getInsertExecPlan("insert into tmap values (2,2,null)");
         Assert.assertTrue(explainString.contains("2 | 2 | NULL"));
 
         explainString = getInsertExecPlan("insert into tmap values (2,2,map(2,2))");
-        Assert.assertTrue(explainString.contains("2 | 2 | {2:'2'}")); // implicit cast
+        Assert.assertTrue(explainString.contains("2 | 2 | map{2:'2'}")); // implicit cast
 
-        explainString = getInsertExecPlan("insert into tmap values (2,2,{})");
-        Assert.assertTrue(explainString.contains("2 | 2 | {}"));
+        explainString = getInsertExecPlan("insert into tmap values (2,2,map{})");
+        Assert.assertTrue(explainString.contains("2 | 2 | map{}"));
 
-        explainString = getInsertExecPlan("insert into tmap values (2,2,{2:3, 2:4})");
-        Assert.assertTrue(explainString.contains("2 | 2 | {2:'3',2:'4'}")); // will distinct in BE
+        explainString = getInsertExecPlan("insert into tmap values (2,2,map{2:3, 2:4})");
+        Assert.assertTrue(explainString.contains("2 | 2 | map{2:'3',2:'4'}")); // will distinct in BE
 
-        explainString = getInsertExecPlan("insert into tmap values (2,2,{2:2})");
-        Assert.assertTrue(explainString.contains("2 | 2 | {2:'2'}")); // implicit cast
+        explainString = getInsertExecPlan("insert into tmap values (2,2,map{2:2})");
+        Assert.assertTrue(explainString.contains("2 | 2 | map{2:'2'}")); // implicit cast
     }
 
     @Test
@@ -818,6 +815,9 @@ public class InsertPlanTest extends PlanTestBase {
 
                 icebergTable.getPartitionColumnNames();
                 result = new ArrayList<>();
+
+                icebergTable.getPartitionColumns();
+                result = Lists.newArrayList(new Column("k1", Type.INT), new Column("k2", Type.INT));
             }
         };
 
@@ -833,6 +833,10 @@ public class InsertPlanTest extends PlanTestBase {
 
                 nativeTable.properties();
                 result = new HashMap<String, String>();
+                minTimes = 0;
+
+                nativeTable.io();
+                result = new HadoopFileIO();
                 minTimes = 0;
             }
         };

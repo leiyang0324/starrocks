@@ -58,7 +58,10 @@ url = http://${mysql-client:host}:${mysql-client:http_port}
 
 ## Running your test
 ```shell
+# run concurrent cases
 $ python3 run.py 
+# run sequential cases
+$ python3 run.py -a sequential -c 1 -v
 ```
 
 # <span id="Parameters">Run Parameters<span>
@@ -111,6 +114,9 @@ If you're not sure of the scope of impact, you can list them first with `-l` fir
 
 **`--case_filter=` [Optional]**  
 The format of the value is a regular expression, and only test cases whose names match it will be executed.
+
+**`--skip_reruns` [Optional]**
+By default, all cases will run 3 times and passed 3 times, if this parameter provided, all case will be run exactly only once, default False.
 
 # <span id="Grammar">Grammar</span>
 This describes the grammar of SQL-tester framework, and how to add your cases.

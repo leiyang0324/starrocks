@@ -116,6 +116,7 @@ import com.starrocks.common.DdlException;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReport;
 import com.starrocks.common.FeConstants;
+import com.starrocks.common.InvalidConfException;
 import com.starrocks.common.MetaNotFoundException;
 import com.starrocks.common.Pair;
 import com.starrocks.common.StarRocksFEMetaVersion;
@@ -141,7 +142,6 @@ import com.starrocks.connector.hive.ConnectorTableMetadataProcessor;
 import com.starrocks.connector.hive.events.MetastoreEventsProcessor;
 import com.starrocks.consistency.ConsistencyChecker;
 import com.starrocks.credential.CloudCredentialUtil;
-import com.starrocks.external.starrocks.StarRocksRepository;
 import com.starrocks.ha.FrontendNodeType;
 import com.starrocks.ha.HAProtocol;
 import com.starrocks.ha.LeaderInfo;
@@ -160,6 +160,7 @@ import com.starrocks.lake.ShardDeleter;
 import com.starrocks.lake.ShardManager;
 import com.starrocks.lake.StarOSAgent;
 import com.starrocks.lake.compaction.CompactionMgr;
+import com.starrocks.lake.vacuum.AutovacuumDaemon;
 import com.starrocks.leader.Checkpoint;
 import com.starrocks.leader.TaskRunStateSynchronizer;
 import com.starrocks.load.DeleteMgr;
@@ -172,6 +173,9 @@ import com.starrocks.load.loadv2.LoadJobScheduler;
 import com.starrocks.load.loadv2.LoadLoadingChecker;
 import com.starrocks.load.loadv2.LoadMgr;
 import com.starrocks.load.loadv2.LoadTimeoutChecker;
+import com.starrocks.load.pipe.PipeListener;
+import com.starrocks.load.pipe.PipeManager;
+import com.starrocks.load.pipe.PipeScheduler;
 import com.starrocks.load.routineload.RoutineLoadMgr;
 import com.starrocks.load.routineload.RoutineLoadScheduler;
 import com.starrocks.load.routineload.RoutineLoadTaskScheduler;
@@ -185,6 +189,7 @@ import com.starrocks.persist.AuthUpgradeInfo;
 import com.starrocks.persist.BackendIdsUpdateInfo;
 import com.starrocks.persist.BackendTabletsInfo;
 import com.starrocks.persist.ChangeMaterializedViewRefreshSchemeLog;
+import com.starrocks.persist.CreateTableInfo;
 import com.starrocks.persist.DropPartitionInfo;
 import com.starrocks.persist.EditLog;
 import com.starrocks.persist.GlobalVarPersistInfo;
@@ -216,6 +221,7 @@ import com.starrocks.plugin.PluginInfo;
 import com.starrocks.plugin.PluginMgr;
 import com.starrocks.privilege.AuthorizationMgr;
 import com.starrocks.privilege.PrivilegeActions;
+import com.starrocks.privilege.PrivilegeException;
 import com.starrocks.qe.AuditEventProcessor;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.JournalObservable;
@@ -308,6 +314,7 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -315,6 +322,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -380,7 +388,6 @@ public class GlobalStateMgr {
     private Daemon replayer;
     private Daemon timePrinter;
     private EsRepository esRepository;  // it is a daemon, so add it here
-    private StarRocksRepository starRocksRepository;
     private MetastoreEventsProcessor metastoreEventsProcessor;
     private ConnectorTableMetadataProcessor connectorTableMetadataProcessor;
 
@@ -524,6 +531,12 @@ public class GlobalStateMgr {
     private ConfigRefreshDaemon configRefreshDaemon;
 
     private StorageVolumeMgr storageVolumeMgr;
+
+    private AutovacuumDaemon autovacuumDaemon;
+
+    private PipeManager pipeManager;
+    private PipeListener pipeListener;
+    private PipeScheduler pipeScheduler;
 
     public NodeMgr getNodeMgr() {
         return nodeMgr;
@@ -683,7 +696,6 @@ public class GlobalStateMgr {
         this.resourceGroupMgr = new ResourceGroupMgr();
 
         this.esRepository = new EsRepository();
-        this.starRocksRepository = new StarRocksRepository();
         this.metastoreEventsProcessor = new MetastoreEventsProcessor();
         this.connectorTableMetadataProcessor = new ConnectorTableMetadataProcessor();
 
@@ -693,17 +705,18 @@ public class GlobalStateMgr {
         this.stat = new TabletSchedulerStat();
 
         this.globalFunctionMgr = new GlobalFunctionMgr();
-        this.tabletScheduler = new TabletScheduler(this, nodeMgr.getClusterInfo(), tabletInvertedIndex, stat);
-        this.tabletChecker = new TabletChecker(this, nodeMgr.getClusterInfo(), tabletScheduler, stat);
+        this.tabletScheduler = new TabletScheduler(stat);
+        this.tabletChecker = new TabletChecker(tabletScheduler, stat);
 
         this.pendingLoadTaskScheduler =
-                new LeaderTaskExecutor("pending_load_task_scheduler", Config.async_load_task_pool_size,
+                new LeaderTaskExecutor("pending_load_task_scheduler", Config.max_broker_load_job_concurrency,
                         Config.desired_max_waiting_jobs, !isCkptGlobalState);
         // One load job will be split into multiple loading tasks, the queue size is not
         // determined, so set desired_max_waiting_jobs * 10
         this.loadingLoadTaskScheduler = new PriorityLeaderTaskExecutor("loading_load_task_scheduler",
-                Config.async_load_task_pool_size,
+                Config.max_broker_load_job_concurrency,
                 Config.desired_max_waiting_jobs * 10, !isCkptGlobalState);
+
         this.loadJobScheduler = new LoadJobScheduler();
         this.loadMgr = new LoadMgr(loadJobScheduler);
         this.loadTimeoutChecker = new LoadTimeoutChecker(loadMgr);
@@ -738,9 +751,13 @@ public class GlobalStateMgr {
         this.shardDeleter = new ShardDeleter();
 
         this.binlogManager = new BinlogManager();
+        this.pipeManager = new PipeManager();
+        this.pipeListener = new PipeListener(this.pipeManager);
+        this.pipeScheduler = new PipeScheduler(this.pipeManager);
 
         if (RunMode.getCurrentRunMode().isAllowCreateLakeTable()) {
             this.storageVolumeMgr = new SharedDataStorageVolumeMgr();
+            this.autovacuumDaemon = new AutovacuumDaemon();
         } else {
             this.storageVolumeMgr = new SharedNothingStorageVolumeMgr();
         }
@@ -757,6 +774,16 @@ public class GlobalStateMgr {
                 gsm.transferToNonLeader(newType);
             }
         };
+
+        getConfigRefreshDaemon().registerListener(() -> {
+            try {
+                if (Config.max_broker_load_job_concurrency != loadingLoadTaskScheduler.getCorePoolSize()) {
+                    loadingLoadTaskScheduler.setCorePoolSize(Config.max_broker_load_job_concurrency);
+                }
+            } catch (Exception e) {
+                LOG.warn("check config failed", e);
+            }
+        });
     }
 
     public static void destroyCheckpoint() {
@@ -970,6 +997,18 @@ public class GlobalStateMgr {
         return storageVolumeMgr;
     }
 
+    public PipeManager getPipeManager() {
+        return pipeManager;
+    }
+
+    public PipeScheduler getPipeScheduler() {
+        return pipeScheduler;
+    }
+
+    public PipeListener getPipeListener() {
+        return pipeListener;
+    }
+
     public ConnectorTblMetaInfoMgr getConnectorTblMetaInfoMgr() {
         return connectorTblMetaInfoMgr;
     }
@@ -1107,9 +1146,6 @@ public class GlobalStateMgr {
         journalWriter = new JournalWriter(journal, journalQueue);
 
         editLog = new EditLog(journalQueue);
-        this.globalTransactionMgr.setEditLog(editLog);
-        this.idGenerator.setEditLog(editLog);
-        this.localMetastore.setEditLog(editLog);
     }
 
     // wait until FE is ready.
@@ -1264,13 +1300,7 @@ public class GlobalStateMgr {
             throw t;
         }
 
-        if (RunMode.allowCreateLakeTable()) {
-            try {
-                ((SharedDataStorageVolumeMgr) storageVolumeMgr).createOrUpdateBuiltinStorageVolume();
-            } catch (DdlException | AnalysisException | AlreadyExistsException e) {
-                LOG.warn("Failed to create or update builtin storage volume", e);
-            }
-        }
+        createBuiltinStorageVolume();
     }
 
     // start all daemon threads only running on Master
@@ -1338,6 +1368,8 @@ public class GlobalStateMgr {
         taskManager.start();
         taskCleaner.start();
         mvMVJobExecutor.start();
+        pipeListener.start();
+        pipeScheduler.start();
 
         // start daemon thread to report the progress of RunningTaskRun to the follower by editlog
         taskRunStateSynchronizer = new TaskRunStateSynchronizer();
@@ -1345,6 +1377,7 @@ public class GlobalStateMgr {
 
         if (RunMode.allowCreateLakeTable()) {
             shardDeleter.start();
+            autovacuumDaemon.start();
         }
 
         if (Config.enable_safe_mode) {
@@ -1360,7 +1393,6 @@ public class GlobalStateMgr {
         labelCleaner.start();
         // ES state store
         esRepository.start();
-        starRocksRepository.start();
 
         if (Config.enable_hms_events_incremental_sync) {
             metastoreEventsProcessor.start();
@@ -1407,6 +1439,19 @@ public class GlobalStateMgr {
         feType = newType;
     }
 
+    void checkOpTypeValid() throws IOException {
+        try {
+            for (Field field : OperationType.class.getDeclaredFields()) {
+                short id = field.getShort(null);
+                if (id > OperationType.OP_TYPE_EOF) {
+                    throw new IOException("OperationType cannot use a value exceeding 20000, " +
+                            "and an error will be reported if it exceeds : " + field.getName() + " = " + id);
+                }
+            }
+        } catch (IllegalAccessException e) {
+            throw new IOException(e);
+        }
+    }
 
     public void loadImage(String imageDir) throws IOException, DdlException {
         Storage storage = new Storage(imageDir);
@@ -1427,6 +1472,8 @@ public class GlobalStateMgr {
         long remoteChecksum = -1;  // in case of empty image file checksum match
         try {
             checksum = loadVersion(dis, checksum);
+            checkOpTypeValid();
+
             if (GlobalStateMgr.getCurrentStateStarRocksMetaVersion() >= StarRocksFEMetaVersion.VERSION_4) {
                 Map<SRMetaBlockID, SRMetaBlockLoader> loadImages = ImmutableMap.<SRMetaBlockID, SRMetaBlockLoader>builder()
                         .put(SRMetaBlockID.NODE_MGR, nodeMgr::load)
@@ -1456,6 +1503,7 @@ public class GlobalStateMgr {
                         .put(SRMetaBlockID.STREAM_LOAD_MGR, streamLoadMgr::load)
                         .put(SRMetaBlockID.MATERIALIZED_VIEW_MGR, MaterializedViewMgr.getInstance()::load)
                         .put(SRMetaBlockID.GLOBAL_FUNCTION_MGR, globalFunctionMgr::load)
+                        .put(SRMetaBlockID.STORAGE_VOLUME_MGR, storageVolumeMgr::load)
                         .build();
                 try {
                     loadHeaderV2(dis);
@@ -1464,8 +1512,8 @@ public class GlobalStateMgr {
                     Map.Entry<SRMetaBlockID, SRMetaBlockLoader> entry = iterator.next();
                     while (true) {
                         SRMetaBlockID srMetaBlockID = entry.getKey();
-                        SRMetaBlockReader reader = new SRMetaBlockReader(dis, srMetaBlockID);
-                        if (reader.getHeader().getId() != srMetaBlockID) {
+                        SRMetaBlockReader reader = new SRMetaBlockReader(dis);
+                        if (!reader.getHeader().getSrMetaBlockID().equals(srMetaBlockID)) {
                             /*
                               The expected read module does not match the module stored in the image,
                               and the json chunk is skipped directly. This usually occurs in several situations.
@@ -1474,7 +1522,7 @@ public class GlobalStateMgr {
                                  the old version ignores the functions of the new version
                              */
                             LOG.warn(String.format("Ignore this invalid meta block, sr meta block id mismatch" +
-                                    "(expect %s actual %s)", srMetaBlockID.name(), reader.getHeader().getId().name()));
+                                    "(expect %s actual %s)", srMetaBlockID, reader.getHeader().getSrMetaBlockID()));
                             reader.close();
                             continue;
                         }
@@ -1482,7 +1530,7 @@ public class GlobalStateMgr {
                         try {
                             SRMetaBlockLoader imageLoader = entry.getValue();
                             imageLoader.apply(reader);
-                            LOG.info("Success load StarRocks meta block " + srMetaBlockID.name() + " from image");
+                            LOG.info("Success load StarRocks meta block " + srMetaBlockID + " from image");
                         } catch (SRMetaBlockEOFException srMetaBlockEOFException) {
                             /*
                               The number of json expected to be read is more than the number of json actually stored
@@ -1515,7 +1563,6 @@ public class GlobalStateMgr {
                 localMetastore.recreateTabletInvertIndex();
                 // rebuild es state state
                 esRepository.loadTableFromCatalog();
-                starRocksRepository.loadTableFromCatalog();
 
                 checksum = load.loadLoadJob(dis, checksum);
                 checksum = loadAlterJob(dis, checksum);
@@ -1563,6 +1610,8 @@ public class GlobalStateMgr {
                 checksum = warehouseMgr.loadWarehouses(dis, checksum);
                 remoteChecksum = dis.readLong();
                 checksum = localMetastore.loadAutoIncrementId(dis, checksum);
+                remoteChecksum = dis.readLong();
+                checksum = pipeManager.getRepo().loadImage(dis, checksum);
                 remoteChecksum = dis.readLong();
                 // ** NOTICE **: always add new code at the end
 
@@ -1671,15 +1720,6 @@ public class GlobalStateMgr {
         MetaContext.get().setStarRocksMetaVersion(starrocksMetaVersion);
 
         return checksum;
-    }
-
-    public long loadHeader(DataInputStream dis, long checksum) throws IOException {
-        if (GlobalStateMgr.getCurrentStateStarRocksMetaVersion() >= StarRocksFEMetaVersion.VERSION_4) {
-            loadHeaderV2(dis);
-            return checksum;
-        } else {
-            return loadHeaderV1(dis, checksum);
-        }
     }
 
     public long loadHeaderV1(DataInputStream dis, long checksum) throws IOException {
@@ -1874,6 +1914,7 @@ public class GlobalStateMgr {
                     streamLoadMgr.save(dos);
                     MaterializedViewMgr.getInstance().save(dos);
                     globalFunctionMgr.save(dos);
+                    storageVolumeMgr.save(dos);
                 } catch (SRMetaBlockException e) {
                     LOG.error("Save meta block failed ", e);
                     throw new IOException("Save meta block failed ", e);
@@ -1935,6 +1976,8 @@ public class GlobalStateMgr {
                 checksum = warehouseMgr.saveWarehouses(dos, checksum);
                 dos.writeLong(checksum);
                 checksum = localMetastore.saveAutoIncrementId(dos, checksum);
+                dos.writeLong(checksum);
+                checksum = pipeManager.getRepo().saveImage(dos, checksum);
                 dos.writeLong(checksum);
                 // ** NOTICE **: always add new code at the end
 
@@ -2425,17 +2468,16 @@ public class GlobalStateMgr {
             List<String> colDef = Lists.newArrayList();
             for (Column column : table.getBaseSchema()) {
                 StringBuilder colSb = new StringBuilder();
-                colSb.append(column.getName());
+                colSb.append("`" + column.getName() + "`");
                 if (!Strings.isNullOrEmpty(column.getComment())) {
-                    colSb.append(" COMMENT ").append("\"").append(column.getComment()).append("\"");
+                    colSb.append(" COMMENT ").append("\"").append(column.getDisplayComment()).append("\"");
                 }
                 colDef.add(colSb.toString());
             }
             sb.append(Joiner.on(", ").join(colDef));
             sb.append(")");
-            if (!Strings.isNullOrEmpty(view.getComment())) {
-                sb.append(" COMMENT \"").append(view.getComment()).append("\"");
-            }
+            addTableComment(sb, view);
+
             sb.append(" AS ").append(view.getInlineViewDef()).append(";");
             createTableStmt.add(sb.toString());
             return;
@@ -2498,9 +2540,7 @@ public class GlobalStateMgr {
                 }
             }
             sb.append(Joiner.on(", ").join(keysColumnNames)).append(")");
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
 
             // partition
             PartitionInfo partitionInfo = olapTable.getPartitionInfo();
@@ -2570,18 +2610,26 @@ public class GlobalStateMgr {
                 sb.append(olapTable.getTableProperty().getDynamicPartitionProperty().toString());
             }
 
-            // enable storage cache && cache ttl
+            String partitionDuration =
+                    olapTable.getTableProperty().getProperties().get(PropertyAnalyzer.PROPERTIES_DATACACHE_PARTITION_DURATION);
+            if (partitionDuration != null) {
+                sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR)
+                        .append(PropertyAnalyzer.PROPERTIES_DATACACHE_PARTITION_DURATION)
+                        .append("\" = \"")
+                        .append(partitionDuration).append("\"");
+            }
+
             if (table.isCloudNativeTable()) {
                 Map<String, String> storageProperties = olapTable.getProperties();
 
                 sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR)
-                        .append(PropertyAnalyzer.PROPERTIES_ENABLE_STORAGE_CACHE)
+                        .append(PropertyAnalyzer.PROPERTIES_DATACACHE_ENABLE)
                         .append("\" = \"");
-                sb.append(storageProperties.get(PropertyAnalyzer.PROPERTIES_ENABLE_STORAGE_CACHE)).append("\"");
+                sb.append(storageProperties.get(PropertyAnalyzer.PROPERTIES_DATACACHE_ENABLE)).append("\"");
 
-                sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR).append(PropertyAnalyzer.PROPERTIES_STORAGE_CACHE_TTL)
+                sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR).append(PropertyAnalyzer.PROPERTIES_STORAGE_VOLUME)
                         .append("\" = \"");
-                sb.append(storageProperties.get(PropertyAnalyzer.PROPERTIES_STORAGE_CACHE_TTL)).append("\"");
+                sb.append(storageProperties.get(PropertyAnalyzer.PROPERTIES_STORAGE_VOLUME)).append("\"");
 
                 sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR)
                         .append(PropertyAnalyzer.PROPERTIES_ENABLE_ASYNC_WRITE_BACK)
@@ -2702,9 +2750,8 @@ public class GlobalStateMgr {
             sb.append("\n)");
         } else if (table.getType() == TableType.MYSQL) {
             MysqlTable mysqlTable = (MysqlTable) table;
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
+
             // properties
             sb.append("\nPROPERTIES (\n");
             sb.append("\"host\" = \"").append(mysqlTable.getHost()).append("\",\n");
@@ -2716,9 +2763,8 @@ public class GlobalStateMgr {
             sb.append(")");
         } else if (table.getType() == TableType.BROKER) {
             BrokerTable brokerTable = (BrokerTable) table;
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
+
             // properties
             sb.append("\nPROPERTIES (\n");
             sb.append("\"broker_name\" = \"").append(brokerTable.getBrokerName()).append("\",\n");
@@ -2734,9 +2780,7 @@ public class GlobalStateMgr {
             }
         } else if (table.getType() == TableType.ELASTICSEARCH) {
             EsTable esTable = (EsTable) table;
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
 
             // partition
             PartitionInfo partitionInfo = esTable.getPartitionInfo();
@@ -2771,9 +2815,7 @@ public class GlobalStateMgr {
             sb.append(")");
         } else if (table.getType() == TableType.HIVE) {
             HiveTable hiveTable = (HiveTable) table;
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
 
             // properties
             sb.append("\nPROPERTIES (\n");
@@ -2789,17 +2831,14 @@ public class GlobalStateMgr {
             FileTable fileTable = (FileTable) table;
             Map<String, String> clonedFileProperties = new HashMap<>(fileTable.getFileProperties());
             CloudCredentialUtil.maskCloudCredential(clonedFileProperties);
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
+
             sb.append("\nPROPERTIES (\n");
             sb.append(new PrintableMap<>(clonedFileProperties, " = ", true, true, false).toString());
             sb.append("\n)");
         } else if (table.getType() == TableType.HUDI) {
             HudiTable hudiTable = (HudiTable) table;
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
 
             // properties
             sb.append("\nPROPERTIES (\n");
@@ -2809,9 +2848,7 @@ public class GlobalStateMgr {
             sb.append("\n)");
         } else if (table.getType() == TableType.ICEBERG) {
             IcebergTable icebergTable = (IcebergTable) table;
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
 
             // properties
             sb.append("\nPROPERTIES (\n");
@@ -2821,9 +2858,7 @@ public class GlobalStateMgr {
             sb.append("\n)");
         } else if (table.getType() == TableType.JDBC) {
             JDBCTable jdbcTable = (JDBCTable) table;
-            if (!Strings.isNullOrEmpty(table.getComment())) {
-                sb.append("\nCOMMENT \"").append(table.getComment()).append("\"");
-            }
+            addTableComment(sb, table);
 
             // properties
             sb.append("\nPROPERTIES (\n");
@@ -2887,12 +2922,14 @@ public class GlobalStateMgr {
         }
     }
 
-    public void replayCreateTable(String dbName, Table table) {
-        localMetastore.replayCreateTable(dbName, table);
+    private static void addTableComment(StringBuilder sb, Table table) {
+        if (!Strings.isNullOrEmpty(table.getComment())) {
+            sb.append("\nCOMMENT \"").append(table.getDisplayComment()).append("\"");
+        }
     }
 
-    public void replayCreateMaterializedView(String dbName, MaterializedView materializedView) {
-        localMetastore.replayCreateMaterializedView(dbName, materializedView);
+    public void replayCreateTable(CreateTableInfo info) {
+        localMetastore.replayCreateTable(info);
     }
 
     // Drop table
@@ -2954,6 +2991,14 @@ public class GlobalStateMgr {
 
     public Database getDb(String name) {
         return localMetastore.getDb(name);
+    }
+
+    public Optional<Database> mayGetDb(String name) {
+        return Optional.ofNullable(localMetastore.getDb(name));
+    }
+
+    public Optional<Database> mayGetDb(long dbId) {
+        return Optional.ofNullable(localMetastore.getDb(dbId));
     }
 
     public Database getDb(long dbId) {
@@ -3143,10 +3188,6 @@ public class GlobalStateMgr {
         return this.esRepository;
     }
 
-    public StarRocksRepository getStarRocksRepository() {
-        return this.starRocksRepository;
-    }
-
     public MetastoreEventsProcessor getMetastoreEventsProcessor() {
         return this.metastoreEventsProcessor;
     }
@@ -3173,7 +3214,6 @@ public class GlobalStateMgr {
 
     public void setEditLog(EditLog editLog) {
         this.editLog = editLog;
-        localMetastore.setEditLog(editLog);
     }
 
     public void setJournal(Journal journal) {
@@ -3922,6 +3962,13 @@ public class GlobalStateMgr {
         } catch (Throwable t) {
             LOG.warn("load manager remove old load jobs failed", t);
         }
+
+        try {
+            loadMgr.cleanResidualJob();
+        } catch (Throwable t) {
+            LOG.warn("load manager clean residual job failed", t);
+        }
+
         try {
             exportMgr.removeOldExportJobs();
         } catch (Throwable t) {
@@ -3948,7 +3995,7 @@ public class GlobalStateMgr {
             LOG.warn("backup handler clean old jobs failed", t);
         }
         try {
-            streamLoadMgr.cleanOldStreamLoadTasks();
+            streamLoadMgr.cleanOldStreamLoadTasks(false);
         } catch (Throwable t) {
             LOG.warn("delete handler remove old delete info failed", t);
         }
@@ -3983,5 +4030,21 @@ public class GlobalStateMgr {
 
     public MetaContext getMetaContext() {
         return metaContext;
+    }
+
+    public void createBuiltinStorageVolume() {
+        try {
+            String builtinStorageVolumeId = storageVolumeMgr.createBuiltinStorageVolume();
+            if (!builtinStorageVolumeId.isEmpty()) {
+                authorizationMgr.grantStorageVolumeUsageToPublicRole(builtinStorageVolumeId);
+            }
+        } catch (InvalidConfException e) {
+            LOG.fatal(e.getMessage());
+            System.exit(-1);
+        } catch (DdlException | AlreadyExistsException e) {
+            LOG.warn("Failed to create or update builtin storage volume", e);
+        } catch (PrivilegeException e) {
+            LOG.warn("Failed to grant builtin storage volume usage to public role", e);
+        }
     }
 }

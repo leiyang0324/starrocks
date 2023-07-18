@@ -31,7 +31,6 @@
 #include "storage/lake/compaction_test_utils.h"
 #include "storage/lake/delta_writer.h"
 #include "storage/lake/fixed_location_provider.h"
-#include "storage/lake/gc.h"
 #include "storage/lake/horizontal_compaction_task.h"
 #include "storage/lake/join_path.h"
 #include "storage/lake/tablet.h"
@@ -61,9 +60,9 @@ public:
     std::string _dir;
 };
 
-class PrimaryKeyCompactionTest : public testing::Test, public testing::WithParamInterface<CompactionParam> {
+class LakePrimaryKeyCompactionTest : public testing::Test, public testing::WithParamInterface<CompactionParam> {
 public:
-    PrimaryKeyCompactionTest() : _partition_id(next_id()) {
+    LakePrimaryKeyCompactionTest() : _partition_id(next_id()) {
         _parent_mem_tracker = std::make_unique<MemTracker>(-1);
         _mem_tracker = std::make_unique<MemTracker>(-1, "", _parent_mem_tracker.get());
         _location_provider = std::make_unique<TestLocationProvider>(kTestGroupPath);
@@ -226,7 +225,7 @@ protected:
 };
 
 // each time overwrite last rows
-TEST_P(PrimaryKeyCompactionTest, test1) {
+TEST_P(LakePrimaryKeyCompactionTest, test1) {
     // Prepare data for writing
     auto chunk0 = generate_data(kChunkSize, 0);
     auto indexes = std::vector<uint32_t>(kChunkSize);
@@ -254,10 +253,10 @@ TEST_P(PrimaryKeyCompactionTest, test1) {
 
     // make sure delvecs have been generated
     for (int i = 0; i < 2; i++) {
-        auto itr = new_tablet_metadata1->delvec_meta().version_to_delvec().find(version - i);
-        EXPECT_TRUE(itr != new_tablet_metadata1->delvec_meta().version_to_delvec().end());
+        auto itr = new_tablet_metadata1->delvec_meta().version_to_file().find(version - i);
+        EXPECT_TRUE(itr != new_tablet_metadata1->delvec_meta().version_to_file().end());
         auto delvec_file = itr->second;
-        EXPECT_TRUE(fs::path_exist(_location_provider->delvec_location(tablet_id, delvec_file)));
+        EXPECT_TRUE(fs::path_exist(_location_provider->delvec_location(tablet_id, delvec_file.name())));
     }
 
     ASSIGN_OR_ABORT(auto tablet, _tablet_manager->get_tablet(tablet_id));
@@ -275,27 +274,11 @@ TEST_P(PrimaryKeyCompactionTest, test1) {
     ASSIGN_OR_ABORT(auto new_tablet_metadata2, _tablet_manager->get_tablet_metadata(tablet_id, version));
     EXPECT_EQ(new_tablet_metadata2->rowsets_size(), 1);
     EXPECT_EQ(3, new_tablet_metadata2->compaction_inputs_size());
-    EXPECT_FALSE(new_tablet_metadata2->has_prev_compaction_version());
-
-    // make sure delvecs have been gc
-    config::lake_gc_metadata_max_versions = 1;
-    ASSERT_OK(metadata_gc(kTestGroupPath, _tablet_manager.get(), txn_id + 1));
-    ASSERT_OK(datafile_gc(kTestGroupPath, _tablet_manager.get(), txn_id + 1));
-
-    std::vector<std::string> files;
-    ASSERT_OK(fs::get_children(lake::join_path(kTestGroupPath, lake::kSegmentDirectoryName), &files));
-
-    std::vector<std::string> delvec_files;
-    for (auto file : files) {
-        if (file.size() >= strlen(".delvec") && file.substr(file.size() - strlen(".delvec")) == ".delvec") {
-            delvec_files.emplace_back(file);
-        }
-    }
-    EXPECT_EQ(delvec_files.size(), 0);
+    EXPECT_FALSE(new_tablet_metadata2->has_prev_garbage_version());
 }
 
 // test write 3 diff chunk
-TEST_P(PrimaryKeyCompactionTest, test2) {
+TEST_P(LakePrimaryKeyCompactionTest, test2) {
     // Prepare data for writing
     std::vector<Chunk> chunks;
     for (int i = 0; i < 3; i++) {
@@ -337,11 +320,11 @@ TEST_P(PrimaryKeyCompactionTest, test2) {
     ASSIGN_OR_ABORT(auto new_tablet_metadata, _tablet_manager->get_tablet_metadata(tablet_id, version));
     EXPECT_EQ(new_tablet_metadata->rowsets_size(), 1);
     EXPECT_EQ(3, new_tablet_metadata->compaction_inputs_size());
-    EXPECT_FALSE(new_tablet_metadata->has_prev_compaction_version());
+    EXPECT_FALSE(new_tablet_metadata->has_prev_garbage_version());
 }
 
 // test write empty chunk
-TEST_P(PrimaryKeyCompactionTest, test3) {
+TEST_P(LakePrimaryKeyCompactionTest, test3) {
     // Prepare data for writing
     std::vector<Chunk> chunks;
     for (int i = 0; i < 3; i++) {
@@ -392,10 +375,10 @@ TEST_P(PrimaryKeyCompactionTest, test3) {
     ASSIGN_OR_ABORT(auto new_tablet_metadata, _tablet_manager->get_tablet_metadata(tablet_id, version));
     EXPECT_EQ(new_tablet_metadata->rowsets_size(), 1);
     EXPECT_EQ(2, new_tablet_metadata->compaction_inputs_size());
-    EXPECT_FALSE(new_tablet_metadata->has_prev_compaction_version());
+    EXPECT_FALSE(new_tablet_metadata->has_prev_garbage_version());
 }
 
-TEST_P(PrimaryKeyCompactionTest, test_compaction_policy) {
+TEST_P(LakePrimaryKeyCompactionTest, test_compaction_policy) {
     // Prepare data for writing
     std::vector<Chunk> chunks;
     for (int i = 0; i < 3; i++) {
@@ -438,7 +421,7 @@ TEST_P(PrimaryKeyCompactionTest, test_compaction_policy) {
     EXPECT_EQ(1, input_rowsets3.size());
 }
 
-TEST_P(PrimaryKeyCompactionTest, test_compaction_policy2) {
+TEST_P(LakePrimaryKeyCompactionTest, test_compaction_policy2) {
     // Prepare data for writing
     std::vector<Chunk> chunks;
     std::vector<std::vector<uint32_t>> indexes_list;
@@ -494,7 +477,123 @@ TEST_P(PrimaryKeyCompactionTest, test_compaction_policy2) {
     EXPECT_EQ(input_rowsets[3]->id(), 3);
 }
 
-TEST_P(PrimaryKeyCompactionTest, test_compaction_sorted) {
+TEST_P(LakePrimaryKeyCompactionTest, test_compaction_policy3) {
+    // Prepare data for writing
+    std::vector<Chunk> chunks;
+    std::vector<std::vector<uint32_t>> indexes_list;
+    for (int i = 0; i < 6; i++) {
+        chunks.push_back(generate_data(kChunkSize, i));
+        auto indexes = std::vector<uint32_t>(kChunkSize);
+        for (int j = 0; j < kChunkSize; j++) {
+            indexes[j] = j;
+        }
+        indexes_list.push_back(indexes);
+    }
+
+    const int64_t old_size = config::write_buffer_size;
+    config::write_buffer_size = 1;
+    auto version = 1;
+    auto tablet_id = _tablet_metadata->id();
+    size_t chunk_index = 0;
+    for (int i = 0; i < 3; i++) {
+        auto txn_id = next_id();
+        auto delta_writer = DeltaWriter::create(_tablet_manager.get(), tablet_id, txn_id, _partition_id, nullptr,
+                                                _mem_tracker.get());
+        ASSERT_OK(delta_writer->open());
+        for (int seg_cnt = 0; seg_cnt <= i; seg_cnt++) {
+            ASSERT_OK(delta_writer->write(chunks[chunk_index], indexes_list[chunk_index].data(),
+                                          indexes_list[chunk_index].size()));
+            chunk_index++;
+        }
+        ASSERT_OK(delta_writer->finish());
+        delta_writer->close();
+        // Publish version
+        ASSERT_OK(_tablet_manager->publish_version(tablet_id, version, version + 1, &txn_id, 1).status());
+        version++;
+    }
+    {
+        auto txn_id = next_id();
+        auto delta_writer = DeltaWriter::create(_tablet_manager.get(), tablet_id, txn_id, _partition_id, nullptr,
+                                                _mem_tracker.get());
+        ASSERT_OK(delta_writer->open());
+        ASSERT_OK(delta_writer->write(chunks[0], indexes_list[0].data(), indexes_list[0].size()));
+        ASSERT_OK(delta_writer->finish());
+        delta_writer->close();
+        // Publish version
+        ASSERT_OK(_tablet_manager->publish_version(tablet_id, version, version + 1, &txn_id, 1).status());
+        version++;
+    }
+    config::write_buffer_size = old_size;
+    ASSERT_EQ(kChunkSize * 6, read(version));
+    ASSIGN_OR_ABORT(auto tablet, _tablet_manager->get_tablet(tablet_id));
+
+    config::max_update_compaction_num_singleton_deltas = 4;
+    ASSIGN_OR_ABORT(auto compaction_policy,
+                    CompactionPolicy::create_compaction_policy(std::make_shared<Tablet>(tablet)));
+    ASSIGN_OR_ABORT(auto input_rowsets, compaction_policy->pick_rowsets(version));
+    EXPECT_EQ(4, input_rowsets.size());
+    EXPECT_EQ(1, input_rowsets[0]->num_segments());
+    EXPECT_EQ(3, input_rowsets[1]->num_segments());
+    EXPECT_EQ(2, input_rowsets[2]->num_segments());
+    EXPECT_EQ(1, input_rowsets[3]->num_segments());
+
+    // check the rowset order, pick rowset#1 first, because it have deleted rows.
+    // Next order is rowset#4#2#3, by their segment count.
+    EXPECT_EQ(input_rowsets[0]->id(), 1);
+    EXPECT_EQ(input_rowsets[1]->id(), 4);
+    EXPECT_EQ(input_rowsets[2]->id(), 2);
+    EXPECT_EQ(input_rowsets[3]->id(), 7);
+}
+
+TEST_P(LakePrimaryKeyCompactionTest, test_compaction_score_by_policy) {
+    // Prepare data for writing
+    std::vector<Chunk> chunks;
+    for (int i = 0; i < 3; i++) {
+        chunks.push_back(generate_data(kChunkSize, i));
+    }
+    auto indexes = std::vector<uint32_t>(kChunkSize);
+    for (int i = 0; i < kChunkSize; i++) {
+        indexes[i] = i;
+    }
+
+    auto version = 1;
+    auto tablet_id = _tablet_metadata->id();
+    for (int i = 0; i < 3; i++) {
+        auto txn_id = next_id();
+        auto delta_writer = DeltaWriter::create(_tablet_manager.get(), tablet_id, txn_id, _partition_id, nullptr,
+                                                _mem_tracker.get());
+        ASSERT_OK(delta_writer->open());
+        ASSERT_OK(delta_writer->write(chunks[i], indexes.data(), indexes.size()));
+        ASSERT_OK(delta_writer->finish());
+        delta_writer->close();
+        // Publish version
+        ASSERT_OK(_tablet_manager->publish_version(tablet_id, version, version + 1, &txn_id, 1).status());
+        version++;
+    }
+    ASSERT_EQ(kChunkSize * 3, read(version));
+    ASSIGN_OR_ABORT(auto tablet, _tablet_manager->get_tablet(tablet_id));
+    ASSIGN_OR_ABORT(auto tablet_meta, tablet.get_metadata(version));
+
+    ASSIGN_OR_ABORT(auto compaction_policy,
+                    CompactionPolicy::create_compaction_policy(std::make_shared<Tablet>(tablet)));
+    config::max_update_compaction_num_singleton_deltas = 1000;
+    ASSIGN_OR_ABORT(auto input_rowsets, compaction_policy->pick_rowsets(version));
+    EXPECT_EQ(3, input_rowsets.size());
+    EXPECT_EQ(3, compaction_score(*tablet_meta));
+
+    config::max_update_compaction_num_singleton_deltas = 2;
+    ASSIGN_OR_ABORT(auto input_rowsets2, compaction_policy->pick_rowsets(version));
+    EXPECT_EQ(2, input_rowsets2.size());
+    EXPECT_EQ(2, compaction_score(*tablet_meta));
+
+    config::max_update_compaction_num_singleton_deltas = 1;
+    ASSIGN_OR_ABORT(auto input_rowsets3, compaction_policy->pick_rowsets(version));
+    EXPECT_EQ(1, input_rowsets3.size());
+    EXPECT_EQ(1, compaction_score(*tablet_meta));
+    config::max_update_compaction_num_singleton_deltas = 1000;
+}
+
+TEST_P(LakePrimaryKeyCompactionTest, test_compaction_sorted) {
     // Prepare data for writing
     std::vector<Chunk> chunks;
     for (int i = 0; i < 3; i++) {
@@ -538,7 +637,7 @@ TEST_P(PrimaryKeyCompactionTest, test_compaction_sorted) {
     ASSIGN_OR_ABORT(auto new_tablet_metadata, _tablet_manager->get_tablet_metadata(tablet_id, version));
     EXPECT_EQ(new_tablet_metadata->rowsets_size(), 1);
     EXPECT_EQ(3, new_tablet_metadata->compaction_inputs_size());
-    EXPECT_FALSE(new_tablet_metadata->has_prev_compaction_version());
+    EXPECT_FALSE(new_tablet_metadata->has_prev_garbage_version());
 
     // check compact to one rowset with in order
     std::vector<int> key_list;
@@ -548,7 +647,7 @@ TEST_P(PrimaryKeyCompactionTest, test_compaction_sorted) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(PrimaryKeyCompactionTest, PrimaryKeyCompactionTest,
+INSTANTIATE_TEST_SUITE_P(LakePrimaryKeyCompactionTest, LakePrimaryKeyCompactionTest,
                          ::testing::Values(CompactionParam{HORIZONTAL_COMPACTION, 5},
                                            CompactionParam{VERTICAL_COMPACTION, 1}),
                          to_string_param_name);

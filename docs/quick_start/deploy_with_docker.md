@@ -6,7 +6,7 @@ By following these steps, you can deploy a simple StarRocks cluster with **one F
 
 > **CAUTION**
 >
-> Deploying StarRocks in Docker containers merely applies to the situation when you need to verify a DEMO with a small dataset. It is not recommended for a massive testing or production environment. To deploy a high-availability StarRocks cluster, see [Deployment overview](../deployment/deployment_overview.md) for other options that suit your scenarios.
+> Deploying StarRocks with the Docker image used in this tutorial merely applies to the situation when you need to verify a DEMO with a small dataset. It is not recommended for a massive testing or production environment. To deploy a high-availability StarRocks cluster, see [Deployment overview](../deployment/deployment_overview.md) for other options that suit your scenarios.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ Download a StarRocks Docker image from [StarRocks Docker Hub](https://hub.docker
 
 ```Bash
 sudo docker run -p 9030:9030 -p 8030:8030 -p 8040:8040 \
-    -itd registry.starrocks.io/starrocks/allin1-ubuntu
+    -itd starrocks/allin1-ubuntu
 ```
 
 > **TROUBLESHOOTING**

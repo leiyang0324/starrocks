@@ -66,6 +66,14 @@ public class Utils {
         return backendIds.get(0);
     }
 
+    public static ComputeNode chooseNode(LakeTablet tablet) {
+        Long nodeId = chooseBackend(tablet);
+        if (nodeId == null) {
+            return null;
+        }
+        return GlobalStateMgr.getCurrentSystemInfo().getBackendOrComputeNode(nodeId);
+    }
+
     // Preconditions: Has required the database's reader lock.
     // Returns a map from backend ID to a list of tablet IDs.
     public static Map<Long, List<Long>> groupTabletID(OlapTable table) throws NoAliveBackendException {
@@ -134,8 +142,7 @@ public class Utils {
             try {
                 PublishVersionResponse response = responseList.get(i).get();
                 if (response != null && response.failedTablets != null && !response.failedTablets.isEmpty()) {
-                    throw new RpcException(backendList.get(i).getHost(),
-                            "Fail to publish version for tablets {}" + response.failedTablets);
+                    throw new RpcException("Fail to publish version for tablets " + response.failedTablets);
                 }
                 if (compactionScores != null && response != null && response.compactionScores != null) {
                     compactionScores.putAll(response.compactionScores);

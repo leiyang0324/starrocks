@@ -187,6 +187,8 @@ public:
 
     static AggregateFunctionPtr MakeCumeDistWindowFunction();
 
+    static AggregateFunctionPtr MakePercentRankWindowFunction();
+
     static AggregateFunctionPtr MakeNtileWindowFunction();
 
     template <LogicalType LT, bool ignoreNulls>
@@ -202,6 +204,11 @@ public:
     template <LogicalType LT, bool ignoreNulls, bool isLag>
     static AggregateFunctionPtr MakeLeadLagWindowFunction() {
         return std::make_shared<LeadLagWindowFunction<LT, ignoreNulls, isLag>>();
+    }
+
+    template <LogicalType LT>
+    static AggregateFunctionPtr MakeAllocateSessionWindowFunction() {
+        return std::make_shared<AllocateSessionWindowFunction<LT>>();
     }
 
     template <LogicalType LT>
