@@ -235,6 +235,7 @@ vectorized_functions = [
     [30011, 'substr', 'VARCHAR', ['VARCHAR', 'INT', 'INT'], 'StringFunctions::substring', 'StringFunctions::sub_str_prepare', 'StringFunctions::sub_str_close'],
     [30012, 'substring', 'VARCHAR', ['VARCHAR', 'INT'], 'StringFunctions::substring', 'StringFunctions::sub_str_prepare', 'StringFunctions::sub_str_close'],
     [30013, 'substring', 'VARCHAR', ['VARCHAR', 'INT', 'INT'], 'StringFunctions::substring', 'StringFunctions::sub_str_prepare', 'StringFunctions::sub_str_close'],
+    [30014, 'substring_index', 'VARCHAR', ['VARCHAR', 'VARCHAR', 'INT'], 'StringFunctions::substring_index', 'StringFunctions::sub_str_prepare', 'StringFunctions::sub_str_close'],
 
     [30020, 'left', 'VARCHAR', ['VARCHAR', 'INT'], 'StringFunctions::left', 'StringFunctions::left_or_right_prepare', 'StringFunctions::left_or_right_close'],
     [30021, 'strleft', 'VARCHAR', ['VARCHAR', 'INT'], 'StringFunctions::left', 'StringFunctions::left_or_right_prepare', 'StringFunctions::left_or_right_close'],

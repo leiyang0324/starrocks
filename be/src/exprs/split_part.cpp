@@ -83,6 +83,7 @@ static bool split_index(const Slice& haystack, const Slice& delimiter, int32_t p
         part_number = -part_number;
         auto haystack_str = haystack.to_string();
         int32_t offset = haystack.size;
+        int32_t init_offset = offset;
         int32_t pre_offset = offset;
         int32_t num = 0;
         auto substr = haystack_str;
@@ -95,7 +96,7 @@ static bool split_index(const Slice& haystack, const Slice& delimiter, int32_t p
                 }
                 pre_offset = offset;
                 offset = offset - 1;
-                substr = haystack_str.substr(0, pre_offset);
+                substr = haystack_str.substr(0, pre_offset); //取消该行
             } else {
                 break;
             }
@@ -108,6 +109,7 @@ static bool split_index(const Slice& haystack, const Slice& delimiter, int32_t p
             } else {
                 res.data = haystack.data + offset + delimiter.size;
                 res.size = pre_offset - offset - delimiter.size;
+                res.size = init_offset - offset - delimiter.size;
             }
             return true;
         }

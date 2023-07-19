@@ -67,6 +67,13 @@ public:
     DEFINE_VECTORIZED_FN(substring);
 
     /**
+     * @param: [string_value, delim, position]
+     * @paramType: [BinaryColumn, BinaryColumn, IntColumn]
+     * @return: BinaryColumn
+     */
+    DEFINE_VECTORIZED_FN(substring_index);
+
+    /**
      * @param: [string_value, length]
      * @paramType: [BinaryColumn, IntColumn]
      * @return: BinaryColumn
