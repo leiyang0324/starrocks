@@ -1666,7 +1666,9 @@ public class LocalMetastore implements ConnectorMetadata {
         if (CollectionUtils.isNotEmpty(notExistPartition)) {
             if (clause.isSetIfExists()) {
                 LOG.info("drop partition[{}] which does not exist", notExistPartition.toString());
-                return;
+                if (CollectionUtils.isEmpty(existPartition)) {
+                    return;
+                }
             } else {
                 ErrorReport.reportDdlException(ErrorCode.ERR_DROP_PARTITION_NON_EXISTENT, notExistPartition.toString());
             }
