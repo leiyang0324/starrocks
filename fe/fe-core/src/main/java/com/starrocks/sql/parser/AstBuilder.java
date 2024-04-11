@@ -59,6 +59,7 @@ import com.starrocks.analysis.LargeIntLiteral;
 import com.starrocks.analysis.LikePredicate;
 import com.starrocks.analysis.LimitElement;
 import com.starrocks.analysis.LiteralExpr;
+import com.starrocks.analysis.MatchExpr;
 import com.starrocks.analysis.MultiInPredicate;
 import com.starrocks.analysis.NamedArgument;
 import com.starrocks.analysis.NullLiteral;
@@ -196,6 +197,7 @@ import com.starrocks.sql.ast.CreateTableLikeStmt;
 import com.starrocks.sql.ast.CreateTableStmt;
 import com.starrocks.sql.ast.CreateUserStmt;
 import com.starrocks.sql.ast.CreateViewStmt;
+import com.starrocks.sql.ast.DataCacheSelectStatement;
 import com.starrocks.sql.ast.DataDescription;
 import com.starrocks.sql.ast.DeallocateStmt;
 import com.starrocks.sql.ast.DecommissionBackendClause;
@@ -1509,15 +1511,20 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
 
         CreateTableAsSelectStmt createTableAsSelectStmt = null;
         InsertStmt insertStmt = null;
+        DataCacheSelectStatement dataCacheSelectStmt = null;
         if (context.createTableAsSelectStatement() != null) {
             createTableAsSelectStmt = (CreateTableAsSelectStmt) visit(context.createTableAsSelectStatement());
         } else if (context.insertStatement() != null) {
             insertStmt = (InsertStmt) visit(context.insertStatement());
+        } else if (context.dataCacheSelectStatement() != null) {
+            dataCacheSelectStmt = (DataCacheSelectStatement) visit(context.dataCacheSelectStatement());
         }
 
         int startIndex = 0;
         if (createTableAsSelectStmt != null) {
             startIndex = context.createTableAsSelectStatement().start.getStartIndex();
+        } else if (dataCacheSelectStmt != null) {
+            startIndex = context.dataCacheSelectStatement().start.getStartIndex();
         } else {
             startIndex = context.insertStatement().start.getStartIndex();
         }
@@ -1532,6 +1539,8 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
         SubmitTaskStmt res;
         if (createTableAsSelectStmt != null) {
             res = new SubmitTaskStmt(taskName, startIndex, createTableAsSelectStmt, pos);
+        } else if (dataCacheSelectStmt != null) {
+            res = new SubmitTaskStmt(taskName, startIndex, dataCacheSelectStmt, pos);
         } else {
             res = new SubmitTaskStmt(taskName, startIndex, insertStmt, pos);
         }
@@ -2208,16 +2217,26 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
 
     // ------------------------------------------- Analyze Statement ---------------------------------------------------
 
+    private List<Expr> getAnalyzeColumns(List<QualifiedName> qualifiedNames) {
+        List<Expr> columns = Lists.newArrayList();
+        for (QualifiedName qualifiedName : qualifiedNames) {
+            if (qualifiedName.getParts().size() == 1) {
+                columns.add(new SlotRef(null, qualifiedName.getParts().get(0)));
+            } else {
+                Expr base = new SlotRef(null, qualifiedName.getParts().get(0));
+                columns.add(new SubfieldExpr(base, qualifiedName.getParts().subList(1,
+                        qualifiedName.getParts().size())));
+            }
+        }
+        return columns;
+    }
+
     @Override
     public ParseNode visitAnalyzeStatement(StarRocksParser.AnalyzeStatementContext context) {
-        QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
-        TableName tableName = qualifiedNameToTableName(qualifiedName);
-
-        List<Identifier> columns = visitIfPresent(context.identifier(), Identifier.class);
-        List<String> columnNames = null;
-        if (columns != null) {
-            columnNames = columns.stream().map(Identifier::getValue).collect(toList());
-        }
+        List<QualifiedName> qualifiedNames = context.qualifiedName().stream().map(this::getQualifiedName).
+                collect(toList());
+        TableName tableName = qualifiedNameToTableName(qualifiedNames.get(0));
+        List<Expr> columns = getAnalyzeColumns(qualifiedNames.subList(1, qualifiedNames.size()));
 
         Map<String, String> properties = new HashMap<>();
         if (context.properties() != null) {
@@ -2227,7 +2246,7 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
             }
         }
 
-        return new AnalyzeStmt(tableName, columnNames, properties,
+        return new AnalyzeStmt(tableName, columns, properties,
                 context.SAMPLE() != null,
                 context.ASYNC() != null,
                 new AnalyzeBasicDesc(), createPos(context));
@@ -2255,14 +2274,11 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
             return new CreateAnalyzeJobStmt(((Identifier) visit(context.db)).getValue(), context.FULL() == null,
                     properties, pos);
         } else if (context.TABLE() != null) {
-            QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
-            TableName tableName = qualifiedNameToTableName(qualifiedName);
-            List<Identifier> columns = visitIfPresent(context.identifier(), Identifier.class);
-            List<String> columnNames = null;
-            if (columns != null) {
-                columnNames = columns.stream().map(Identifier::getValue).collect(toList());
-            }
-            return new CreateAnalyzeJobStmt(tableName, columnNames, context.SAMPLE() != null, properties, pos);
+            List<QualifiedName> qualifiedNames = context.qualifiedName().stream().map(this::getQualifiedName).
+                    collect(toList());
+            TableName tableName = qualifiedNameToTableName(qualifiedNames.get(0));
+            List<Expr> columns = getAnalyzeColumns(qualifiedNames.subList(1, qualifiedNames.size()));
+            return new CreateAnalyzeJobStmt(tableName, columns, context.SAMPLE() != null, properties, pos);
         } else {
             return new CreateAnalyzeJobStmt(context.FULL() == null, properties, pos);
         }
@@ -2312,14 +2328,10 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
 
     @Override
     public ParseNode visitAnalyzeHistogramStatement(StarRocksParser.AnalyzeHistogramStatementContext context) {
-        QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
-        TableName tableName = qualifiedNameToTableName(qualifiedName);
-
-        List<Identifier> columns = visitIfPresent(context.identifier(), Identifier.class);
-        List<String> columnNames = null;
-        if (columns != null) {
-            columnNames = columns.stream().map(Identifier::getValue).collect(toList());
-        }
+        List<QualifiedName> qualifiedNames = context.qualifiedName().stream().map(this::getQualifiedName).
+                collect(toList());
+        TableName tableName = qualifiedNameToTableName(qualifiedNames.get(0));
+        List<Expr> columns = getAnalyzeColumns(qualifiedNames.subList(1, qualifiedNames.size()));
 
         Map<String, String> properties = new HashMap<>();
         if (context.properties() != null) {
@@ -2336,22 +2348,18 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
             bucket = Config.histogram_buckets_size;
         }
 
-        return new AnalyzeStmt(tableName, columnNames, properties, true,
+        return new AnalyzeStmt(tableName, columns, properties, true,
                 context.ASYNC() != null, new AnalyzeHistogramDesc(bucket), createPos(context));
     }
 
     @Override
     public ParseNode visitDropHistogramStatement(StarRocksParser.DropHistogramStatementContext context) {
-        QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
-        TableName tableName = qualifiedNameToTableName(qualifiedName);
+        List<QualifiedName> qualifiedNames = context.qualifiedName().stream().map(this::getQualifiedName).
+                collect(toList());
+        TableName tableName = qualifiedNameToTableName(qualifiedNames.get(0));
+        List<Expr> columns = getAnalyzeColumns(qualifiedNames.subList(1, qualifiedNames.size()));
 
-        List<Identifier> columns = visitIfPresent(context.identifier(), Identifier.class);
-        List<String> columnNames = null;
-        if (columns != null) {
-            columnNames = columns.stream().map(Identifier::getValue).collect(toList());
-        }
-
-        return new DropHistogramStmt(tableName, columnNames, createPos(context));
+        return new DropHistogramStmt(tableName, columns, createPos(context));
     }
 
     @Override
@@ -3198,6 +3206,49 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
     @Override
     public ParseNode visitClearDataCacheRulesStatement(StarRocksParser.ClearDataCacheRulesStatementContext ctx) {
         return new ClearDataCacheRulesStmt(createPos(ctx));
+    }
+
+    @Override
+    public ParseNode visitDataCacheSelectStatement(StarRocksParser.DataCacheSelectStatementContext ctx) {
+        // cache select only support select one table at a time
+        // create a single table relation
+        TableRelation tableRelation = null;
+        {
+            QualifiedName qualifiedName = getQualifiedName(ctx.qualifiedName());
+            TableName tableName = qualifiedNameToTableName(qualifiedName);
+            tableRelation = new TableRelation(tableName);
+        }
+
+        // create select items
+        List<SelectListItem> selectItems = visit(ctx.selectItem(), SelectListItem.class);
+        SelectList selectList = new SelectList(selectItems, false);
+
+        // create query relation based on tableRelation and selectItems
+        QueryRelation queryRelation = new SelectRelation(
+                selectList,
+                tableRelation,
+                (Expr) visitIfPresent(ctx.where),
+                null,
+                null,
+                createPos(ctx));
+
+
+        // create queryStatement based on queryRelation
+        QueryStatement queryStatement = new QueryStatement(queryRelation);
+
+        // Convert queryStatement into InsertStmt(`INSERT INTO BLACKHOLE() SELECT xxx FROM TBL`)
+        InsertStmt insertStmt = new InsertStmt(queryStatement, createPos(ctx));
+
+        // properties
+        Map<String, String> properties = new HashMap<>();
+        if (ctx.properties() != null) {
+            List<Property> propertyList = visit(ctx.properties().property(), Property.class);
+            for (Property property : propertyList) {
+                properties.put(property.getKey(), property.getValue());
+            }
+        }
+
+        return new DataCacheSelectStatement(insertStmt, properties, createPos(ctx));
     }
 
     // ----------------------------------------------- Export Statement ------------------------------------------------
@@ -6577,6 +6628,17 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
             arguments.add(new LambdaArgument(names.get(i)));
         }
         return new LambdaFunctionExpr(arguments);
+    }
+
+    @Override
+    public ParseNode visitMatchExpr(StarRocksParser.MatchExprContext context) {
+        NodePosition pos = createPos(context);
+        MatchExpr matchExpr = new MatchExpr((Expr) visit(context.left), (Expr) visit(context.right), pos);
+        if (context.NOT() != null) {
+            return new CompoundPredicate(CompoundPredicate.Operator.NOT, matchExpr, null, pos);
+        } else {
+            return matchExpr;
+        }
     }
 
     @Override

@@ -2164,6 +2164,73 @@ public class MaterializedViewTest extends MaterializedViewTestBase {
     }
 
     @Test
+    public void testViewDeltaJoinUKFK15() {
+        connectContext.getSessionVariable().setMaterializedViewMaxRelationMappingSize(0);
+        String mv = "select emps.empid, emps.deptno, dependents.name from emps\n"
+                + "inner join depts b on (emps.deptno=b.deptno)\n"
+                + "left outer join dependents using (empid)"
+                + "where emps.empid = 1";
+
+        String query = "select emps.empid, dependents.name from emps\n"
+                + "left outer join dependents using (empid)\n"
+                + "where emps.empid = 1";
+        testRewriteFail(mv, query);
+        connectContext.getSessionVariable().setMaterializedViewMaxRelationMappingSize(5);
+    }
+
+    @Test
+    public void testViewDeltaJoinUKFK16() {
+        // set join derive rewrite in view delta
+        String mv = "select emps.empid, emps.deptno, dependents.name from emps\n"
+                + "left outer join depts b on (emps.deptno=b.deptno)\n"
+                + "left outer join dependents using (empid)";
+
+        String query = "select emps.empid, dependents.name from emps\n"
+                + "left outer join dependents using (empid)\n"
+                + "where dependents.name = 'name1'";
+        testRewriteOK(mv, query);
+    }
+
+    @Test
+    public void testViewDeltaJoinUKFK17() {
+        // set join derive rewrite in view delta
+        String mv = "select emps.empid, emps.deptno, dependents.name from emps\n"
+                + "left outer join depts b on (emps.deptno=b.deptno)\n"
+                + "left outer join dependents using (empid)";
+
+        String query = "select emps.empid, dependents.name from emps\n"
+                + " join dependents using (empid)\n"
+                + "where dependents.name = 'name1'";
+        testRewriteOK(mv, query);
+    }
+
+    @Test
+    public void testViewDeltaJoinUKFK18() {
+        // set join derive rewrite in view delta
+        String mv = "select emps.empid, emps.deptno, dependents.name from emps\n"
+                + "left outer join depts b on (emps.deptno=b.deptno)\n"
+                + "full outer join dependents using (empid)";
+
+        String query = "select emps.empid, dependents.name from emps\n"
+                + " full join dependents using (empid)\n"
+                + "where emps.empid = '1'";
+        testRewriteOK(mv, query);
+    }
+
+    @Test
+    public void testViewDeltaJoinUKFK19() {
+        // set join derive rewrite in view delta
+        String mv = "select emps.empid, emps.deptno, dependents.name from emps\n"
+                + "left outer join depts b on (emps.deptno=b.deptno)\n"
+                + "full outer join dependents using (empid)";
+
+        String query = "select emps.empid, dependents.name from emps\n"
+                + " inner join dependents using (empid)\n"
+                + "where emps.empid = '1'";
+        testRewriteOK(mv, query);
+    }
+
+    @Test
     public void testViewDeltaJoinUKFKInMV1() {
         String mv = "select emps.empid, emps.deptno, dependents.name from emps\n"
                 + "join dependents using (empid)";
@@ -2248,6 +2315,23 @@ public class MaterializedViewTest extends MaterializedViewTestBase {
         testRewriteOK(mv, query, constraint).
                 contains("0:OlapScanNode\n" +
                         "     TABLE: mv0");
+    }
+
+    @Test
+    public void testViewDeltaJoinUKFKInMV7() {
+        connectContext.getSessionVariable().setMaterializedViewMaxRelationMappingSize(1);
+        String mv = "select emps.empid, emps.deptno, dependents.name from emps_no_constraint emps\n"
+                + "left join dependents using (empid)"
+                + "inner join depts b on (emps.deptno=b.deptno)\n"
+                + "left outer join depts a on (emps.deptno=a.deptno)\n"
+                + "where emps.empid = 1";
+        String query = "select empid, emps.deptno from emps_no_constraint emps join depts b on (emps.deptno=b.deptno) \n"
+                + "where empid = 1";
+        String constraint = "\"unique_constraints\" = \"dependents.empid; depts.deptno\"," +
+                "\"foreign_key_constraints\" = \"emps_no_constraint(empid) references dependents(empid);" +
+                "emps_no_constraint(deptno) references depts(deptno)\" ";
+        testRewriteFail(mv, query, constraint);
+        connectContext.getSessionVariable().setMaterializedViewMaxRelationMappingSize(5);
     }
 
     @Test
