@@ -294,7 +294,7 @@ public class EditLog {
                     DropPartitionInfo info = (DropPartitionInfo) journal.getData();
                     LOG.info("Begin to unprotect drop partition. db = " + info.getDbId()
                             + " table = " + info.getTableId()
-                            + " partitionName = " + info.getPartitionName());
+                            + " partitionName = " + info.getPartitionNames());
                     globalStateMgr.getLocalMetastore().replayDropPartition(info);
                     break;
                 }

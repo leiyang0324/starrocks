@@ -38,13 +38,18 @@ import com.google.common.base.Objects;
 import com.google.gson.annotations.SerializedName;
 import com.starrocks.common.io.Text;
 import com.starrocks.common.io.Writable;
+import com.starrocks.persist.gson.GsonPostProcessable;
+import com.starrocks.persist.gson.GsonPreProcessable;
 import com.starrocks.persist.gson.GsonUtils;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-public class DropPartitionInfo implements Writable {
+public class DropPartitionInfo implements Writable, GsonPreProcessable, GsonPostProcessable {
     @SerializedName(value = "dbId")
     private Long dbId;
     @SerializedName(value = "tableId")
@@ -55,17 +60,18 @@ public class DropPartitionInfo implements Writable {
     private boolean isTempPartition = false;
     @SerializedName(value = "forceDrop")
     private boolean forceDrop = false;
+    @SerializedName(value = "partitionNames")
+    private List<String> partitionNames = new ArrayList<>();
 
     private DropPartitionInfo() {
     }
 
-    public DropPartitionInfo(Long dbId, Long tableId, String partitionName, boolean isTempPartition,
-                             boolean forceDrop) {
+    public DropPartitionInfo(Long dbId, Long tableId, boolean isTempPartition, boolean forceDrop, List<String> partitionNames) {
         this.dbId = dbId;
         this.tableId = tableId;
-        this.partitionName = partitionName;
         this.isTempPartition = isTempPartition;
         this.forceDrop = forceDrop;
+        this.partitionNames = partitionNames;
     }
 
     public Long getDbId() {
@@ -88,6 +94,14 @@ public class DropPartitionInfo implements Writable {
         return forceDrop;
     }
 
+    public List<String> getPartitionNames() {
+        return partitionNames;
+    }
+
+    public void setPartitionNames(List<String> partitionNames) {
+        this.partitionNames = partitionNames;
+    }
+
     public static DropPartitionInfo read(DataInput in) throws IOException {
         String json = Text.readString(in);
         return GsonUtils.GSON.fromJson(json, DropPartitionInfo.class);
@@ -99,26 +113,36 @@ public class DropPartitionInfo implements Writable {
         Text.writeString(out, json);
     }
 
-    @Override
     public int hashCode() {
-        return Objects.hashCode(dbId, tableId, partitionName);
+        return Objects.hashCode(dbId, tableId, partitionNames != null ? partitionNames : Collections.emptyList());
     }
 
-    @Override
     public boolean equals(Object obj) {
         if (this == obj) {
             return true;
         }
-        if (!(obj instanceof DropPartitionInfo)) {
+        if (obj == null || getClass() != obj.getClass()) {
             return false;
         }
-
         DropPartitionInfo info = (DropPartitionInfo) obj;
-
         return (dbId.equals(info.dbId))
                 && (tableId.equals(info.tableId))
-                && (partitionName.equals(info.partitionName))
+                && ((partitionNames == null && info.partitionNames == null) ||
+                (partitionNames != null && partitionNames.equals(info.partitionNames)))
                 && (isTempPartition == info.isTempPartition)
                 && (forceDrop == info.forceDrop);
+    }
+
+    @Override
+    public void gsonPostProcess() throws IOException {
+        if (partitionName != null && partitionNames.size() == 0) {
+            partitionNames.add(partitionName);
+        }
+    }
+    @Override
+    public void gsonPreProcess() throws IOException {
+        if (partitionNames != null && partitionNames.size() == 1) {
+            partitionName = partitionNames.get(0);
+        }
     }
 }
