@@ -1563,9 +1563,9 @@ public class LocalMetastore implements ConnectorMetadata {
         CatalogUtils.checkTableExist(db, table.getName());
         Locker locker = new Locker();
         OlapTable olapTable = (OlapTable) table;
+        Preconditions.checkArgument(locker.isWriteLockHeldByCurrentThread(db));
         PartitionInfo partitionInfo = olapTable.getPartitionInfo();
         Map<String, String> tableProperties = olapTable.getTableProperty().getProperties();
-        Preconditions.checkArgument(locker.isWriteLockHeldByCurrentThread(db));
 
         if (olapTable.getState() != OlapTable.OlapTableState.NORMAL) {
             throw InvalidOlapTableStateException.of(olapTable.getState(), olapTable.getName());
@@ -1675,9 +1675,9 @@ public class LocalMetastore implements ConnectorMetadata {
                     clause.isForceDrop());
         } else {
             DropPartitionsInfo info =
-                    new DropPartitionsInfo(dbId, tableId, isTempPartition, clause.isForceDrop(), partitionNames);
+                    new DropPartitionsInfo(dbId, tableId, isTempPartition, clause.isForceDrop(), existPartitions);
             editLog.logDropPartitions(info);
-            LOG.info("succeed in dropping partitions[{}], is temp : {}, is force : {}", partitionNames, isTempPartition,
+            LOG.info("succeed in dropping partitions[{}], is temp : {}, is force : {}", existPartitions, isTempPartition,
                     clause.isForceDrop());
         }
 
@@ -1744,6 +1744,9 @@ public class LocalMetastore implements ConnectorMetadata {
         Locker locker = new Locker();
         locker.lockDatabase(db, LockType.WRITE);
         try {
+            LOG.info("Begin to unprotect drop partitions. db = " + info.getDbId()
+                    + " table = " + info.getTableId()
+                    + " partitionNames = " + info.getPartitionNames());
             List<String> partitionNames = info.getPartitionNames();
             OlapTable olapTable = (OlapTable) db.getTable(info.getTableId());
             boolean isTempPartition = info.isTempPartition();
